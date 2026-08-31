@@ -1,0 +1,33 @@
+# Node
+node_modules/
+.next/
+frontend/next-build/
+next-build/
+out/
+dist/
+coverage/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.db
+backend/*.db
+
+# Environment
+.env
+.env.local
+backend/.env
+frontend/.env.local
+
+# Local artifacts
+.artifact-work/
+outputs/
+
+# OS
+.DS_Store
+Thumbs.db
