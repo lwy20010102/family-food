@@ -1,14 +1,6 @@
 /** @type {import('next').NextConfig} */
-const isVercel = process.env.VERCEL === "1";
-const distDir = process.env.NEXT_DIST_DIR ?? "next-build";
-
-// Vercel manages the Next.js runtime and expects the default build output.
-// Keep the standalone output for local/container workflows.
-const nextConfig = isVercel
-  ? {}
-  : {
-      output: "standalone",
-      distDir,
-    };
+// Vercel and Render both manage the Next.js runtime directly, so use the
+// standard output directory for both hosts.
+const nextConfig = {};
 
 export default nextConfig;
