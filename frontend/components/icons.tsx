@@ -90,6 +90,24 @@ export function MenuIcon({ className }: IconProps) {
   );
 }
 
+export function MoreIcon({ className }: IconProps) {
+  return (
+    <IconShell className={className}>
+      <circle cx="6" cy="12" r="1" fill="currentColor" />
+      <circle cx="12" cy="12" r="1" fill="currentColor" />
+      <circle cx="18" cy="12" r="1" fill="currentColor" />
+    </IconShell>
+  );
+}
+
+export function CloseIcon({ className }: IconProps) {
+  return (
+    <IconShell className={className}>
+      <path d="m6.5 6.5 11 11M17.5 6.5l-11 11" />
+    </IconShell>
+  );
+}
+
 export function CalendarIcon({ className }: IconProps) {
   return (
     <IconShell className={className}>

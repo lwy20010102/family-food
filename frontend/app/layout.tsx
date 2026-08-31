@@ -8,12 +8,20 @@ export const metadata: Metadata = {
     template: "%s · FamilyFood",
   },
   description: "家庭智能点菜平台",
+  applicationName: "FamilyFood",
+  appleWebApp: {
+    capable: true,
+    title: "FamilyFood",
+    statusBarStyle: "default",
+  },
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  themeColor: "#15803d",
+  colorScheme: "light",
 };
 
 export default function RootLayout({

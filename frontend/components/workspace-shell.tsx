@@ -3,13 +3,16 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
 
 import {
   BrandMark,
   CalendarIcon,
+  CloseIcon,
   FamilyIcon,
   HomeIcon,
   MenuIcon,
+  MoreIcon,
   NotificationsIcon,
   OrdersIcon,
   PlusIcon,
@@ -111,19 +114,30 @@ export function WorkspaceShell({
   actions,
 }: WorkspaceShellProps) {
   const pathname = usePathname();
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const activeItems = navItems.map((item) => ({
     ...item,
     active: isActiveItem(item, pathname),
   }));
   const mobilePrimaryItems = activeItems.filter(
-    (item) => item.href === "/" || item.href === "/recipes" || item.href === "/weekly-menu",
-  );
-  const mobileSecondaryItems = activeItems.filter(
     (item) =>
-      item.href === "/notifications" ||
-      item.href === "/family" ||
-      item.href === "/statistics",
+      item.href === "/" ||
+      item.href === "/recipes" ||
+      item.href === "/orders" ||
+      item.href === "/menu",
   );
+  const mobileMoreItems = activeItems.filter(
+    (item) =>
+      item.href === "/weekly-menu" ||
+      item.href === "/notifications" ||
+      item.href === "/statistics" ||
+      item.href === "/family",
+  );
+  const mobileMoreActive = mobileMoreItems.some((item) => item.active);
+
+  useEffect(() => {
+    setMobileMoreOpen(false);
+  }, [pathname]);
 
   return (
     <div className="workspace-shell">
@@ -207,14 +221,14 @@ export function WorkspaceShell({
             </div>
           </header>
 
-          <div className="page-stack pt-4">{children}</div>
+          <div className="page-stack">{children}</div>
         </div>
       </div>
 
       <nav className="mobile-nav" aria-label="主要导航">
         <div className="mobile-nav-surface">
           <div className="mobile-nav-grid">
-            {mobilePrimaryItems.map((item) => (
+            {mobilePrimaryItems.slice(0, 2).map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
@@ -226,27 +240,92 @@ export function WorkspaceShell({
               </Link>
             ))}
 
-            <Link href="/recipes/manual" className="mobile-nav-center">
+            <Link href="/recipes/manual" className="mobile-nav-center" aria-label="录入菜谱">
               <span className="mobile-nav-center-bubble">
                 <PlusIcon className="h-5 w-5" />
               </span>
               <span>录入</span>
             </Link>
 
-            {mobileSecondaryItems.map((item) => (
+            {mobilePrimaryItems.slice(2).map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                data-active={item.active}
+                className="mobile-nav-link"
+              >
+                <span className="mobile-nav-icon">{item.icon}</span>
+                <span>{item.label}</span>
+              </Link>
+            ))}
+
+            <button
+              type="button"
+              className="mobile-nav-link mobile-nav-more"
+              data-active={mobileMoreOpen || mobileMoreActive}
+              aria-expanded={mobileMoreOpen}
+              onClick={() => setMobileMoreOpen((open) => !open)}
+            >
+              <span className="mobile-nav-icon">
+                {mobileMoreOpen ? <CloseIcon className="h-4 w-4" /> : <MoreIcon className="h-4 w-4" />}
+              </span>
+              <span>更多</span>
+            </button>
+          </div>
+        </div>
+      </nav>
+
+      {mobileMoreOpen ? (
+        <div className="mobile-more-layer">
+          <button
+            type="button"
+            className="mobile-more-backdrop"
+            aria-label="关闭更多菜单"
+            onClick={() => setMobileMoreOpen(false)}
+          />
+          <div className="mobile-more-sheet" role="dialog" aria-modal="true" aria-label="更多功能">
+            <div className="mobile-more-sheet-head">
+              <div>
+                <p className="mobile-more-sheet-title">更多功能</p>
+                <p className="mobile-more-sheet-description">把周计划、通知和个人设置放在这里。</p>
+              </div>
+              <button
+                type="button"
+                className="mobile-more-close"
+                aria-label="关闭更多菜单"
+                title="关闭"
+                onClick={() => setMobileMoreOpen(false)}
+              >
+                <CloseIcon className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="mobile-more-grid">
+              {mobileMoreItems.map((item) => (
                 <Link
                   key={item.href}
                   href={item.href}
                   data-active={item.active}
-                  className="mobile-nav-link"
+                  className="mobile-more-link"
                 >
-                  <span className="mobile-nav-icon">{item.icon}</span>
-                  <span>{item.label}</span>
+                  <span className="mobile-more-icon">{item.icon}</span>
+                  <span>
+                    <strong>{item.label}</strong>
+                    <small>
+                      {item.href === "/weekly-menu"
+                        ? "提前安排一周三餐"
+                        : item.href === "/notifications"
+                          ? "查看新的家庭消息"
+                          : item.href === "/statistics"
+                            ? "回顾饮食参与情况"
+                            : "管理个人与家庭空间"}
+                    </small>
+                  </span>
                 </Link>
               ))}
+            </div>
           </div>
         </div>
-      </nav>
+      ) : null}
     </div>
   );
 }
