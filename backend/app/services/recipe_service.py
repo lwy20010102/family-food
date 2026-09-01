@@ -165,6 +165,7 @@ def _apply_recipe_fields(recipe: Recipe, data: RecipeCreateRequest | RecipeUpdat
     recipe.difficulty = data.difficulty
     recipe.tips = [tip.strip() for tip in data.tips if tip.strip()]
     recipe.source_type = data.source_type
+    recipe.source_url = data.source_url.strip() if data.source_url else None
 
 
 def _replace_ingredients(recipe: Recipe, data: RecipeCreateRequest | RecipeUpdateRequest) -> None:

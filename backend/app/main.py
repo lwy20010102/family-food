@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.api.auth import router as auth_router
 from app.api.daily_menus import router as daily_menus_router
@@ -16,6 +17,7 @@ from app.api.shopping_lists import router as shopping_lists_router
 from app.api.weekly_menus import router as weekly_menus_router
 from app.core.config import get_settings
 from app.database.init_db import init_db
+from app.services.recipe_image_service import LOCAL_RECIPE_IMAGE_DIR
 
 
 @asynccontextmanager
@@ -41,6 +43,14 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+    )
+    app.mount(
+        "/media",
+        StaticFiles(
+            directory=str(LOCAL_RECIPE_IMAGE_DIR.parent),
+            check_dir=False,
+        ),
+        name="media",
     )
 
     app.include_router(health_router, prefix=settings.api_v1_prefix)

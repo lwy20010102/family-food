@@ -49,6 +49,7 @@ class RecipeBase(BaseModel):
     difficulty: RecipeDifficulty = "简单"
     tips: list[str] = Field(default_factory=list)
     source_type: RecipeSourceType = "manual"
+    source_url: str | None = Field(default=None, max_length=500)
     ingredients: list[RecipeIngredientBase] = Field(default_factory=list)
     steps: list[RecipeStepBase] = Field(default_factory=list)
 
@@ -67,6 +68,7 @@ class RecipeSummary(BaseModel):
     id: int
     family_id: int
     creator_id: int
+    recipe_key: str | None = None
     title: str
     description: str
     category: str
@@ -76,6 +78,7 @@ class RecipeSummary(BaseModel):
     difficulty: str
     tips: list[str]
     source_type: str
+    source_url: str | None = None
     created_at: datetime
     updated_at: datetime
     creator: UserPublic
@@ -98,6 +101,11 @@ class RecipesResponse(BaseModel):
 
 class RecipeResponse(BaseModel):
     recipe: RecipeDetail
+
+
+class RecipeImageUploadResponse(BaseModel):
+    image_url: str
+    filename: str | None = None
 
 
 class RecipeFavoriteResponse(BaseModel):

@@ -1,6 +1,6 @@
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
@@ -14,11 +14,13 @@ from app.schemas.recipe import (
     RecipeFavoriteResponse,
     RecipeHistoryItem,
     RecipeHistoryResponse,
+    RecipeImageUploadResponse,
     RecipeResponse,
     RecipeSummary,
     RecipesResponse,
     RecipeUpdateRequest,
 )
+from app.schemas.recipe_import import RecipeImportPreview, RecipeImportResult
 from app.services.family_service import get_user_workspace
 from app.services.dietary_preference_service import (
     RecipePreferenceMatch,
@@ -38,6 +40,14 @@ from app.services.recipe_service import (
     set_recipe_favorite,
     update_recipe,
 )
+from app.services.recipe_import_service import (
+    MAX_IMPORT_FILE_BYTES,
+    build_recipe_import_records,
+    import_recipe_records,
+    preview_recipe_workbook,
+)
+from app.services.recipe_image_service import store_recipe_image
+from app.core.config import get_settings
 
 router = APIRouter(prefix="/recipes", tags=["recipes"])
 
@@ -121,6 +131,119 @@ def get_recipes(
         )
 
     return RecipesResponse(recipes=serialized_recipes)
+
+
+@router.post(
+    "/image",
+    response_model=RecipeImageUploadResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def upload_recipe_image(
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+) -> RecipeImageUploadResponse:
+    settings = get_settings()
+    public_base_url = settings.backend_public_url or str(request.base_url).rstrip("/")
+    try:
+        image_url = store_recipe_image(
+            file=file,
+            settings=settings,
+            user_id=current_user.id,
+            public_base_url=public_base_url,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="图片保存失败，请稍后重试",
+        ) from exc
+
+    return RecipeImageUploadResponse(
+        image_url=image_url,
+        filename=file.filename,
+    )
+
+
+@router.post("/import/preview", response_model=RecipeImportPreview)
+def preview_recipe_import(
+    file: UploadFile = File(...),
+    _current_user: User = Depends(get_current_user),
+) -> RecipeImportPreview:
+    filename = file.filename or "未命名文件.xlsx"
+    if not filename.lower().endswith(".xlsx"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="只支持 .xlsx 格式的 Excel 文件",
+        )
+
+    file_bytes = file.file.read()
+    if len(file_bytes) > MAX_IMPORT_FILE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Excel 文件不能超过 100 MB",
+        )
+
+    try:
+        return preview_recipe_workbook(filename, file_bytes)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+
+@router.post("/import", response_model=RecipeImportResult)
+def import_recipes_from_workbook(
+    file: UploadFile = File(...),
+    include_drafts: bool = Form(False),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> RecipeImportResult:
+    filename = file.filename or "未命名文件.xlsx"
+    if not filename.lower().endswith(".xlsx"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="只支持 .xlsx 格式的 Excel 文件",
+        )
+
+    file_bytes = file.file.read()
+    if len(file_bytes) > MAX_IMPORT_FILE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Excel 文件不能超过 100 MB",
+        )
+
+    try:
+        _, records = build_recipe_import_records(
+            filename,
+            file_bytes,
+            include_drafts=include_drafts,
+        )
+        family_id = _get_family_id(db, current_user)
+        return import_recipe_records(
+            db,
+            family_id,
+            current_user.id,
+            records,
+            filename,
+        )
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="菜谱导入失败，数据库没有被修改",
+        ) from exc
 
 
 @router.get("/favorites", response_model=RecipesResponse)

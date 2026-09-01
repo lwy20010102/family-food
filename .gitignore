@@ -17,6 +17,7 @@ venv/
 .ruff_cache/
 *.db
 backend/*.db
+backend/uploads/
 
 # Environment
 .env

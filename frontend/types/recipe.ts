@@ -35,6 +35,7 @@ export type RecipeSummary = {
   id: number;
   family_id: number;
   creator_id: number;
+  recipe_key: string | null;
   title: string;
   description: string;
   category: RecipeCategory;
@@ -44,6 +45,7 @@ export type RecipeSummary = {
   difficulty: RecipeDifficulty;
   tips: string[];
   source_type: RecipeSourceType;
+  source_url: string | null;
   created_at: string;
   updated_at: string;
   creator: User;
@@ -80,6 +82,11 @@ export type RecipeHistoryResponse = {
 
 export type RecipeResponse = {
   recipe: RecipeDetail;
+};
+
+export type RecipeImageUploadResponse = {
+  image_url: string;
+  filename: string | null;
 };
 
 export type RecipeDeleteResponse = {

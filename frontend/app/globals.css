@@ -326,12 +326,24 @@ code {
     @apply bg-emerald-50 text-emerald-700;
   }
 
+  .chip-success {
+    @apply bg-emerald-50 text-emerald-700;
+  }
+
   .chip-warm {
+    @apply bg-amber-50 text-amber-700;
+  }
+
+  .chip-warning {
     @apply bg-amber-50 text-amber-700;
   }
 
   .chip-danger {
     @apply bg-rose-50 text-rose-700;
+  }
+
+  .eyebrow {
+    @apply text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700;
   }
 
   .status-chip {

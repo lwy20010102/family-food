@@ -22,6 +22,11 @@ class Recipe(Base):
         index=True,
         nullable=False,
     )
+    recipe_key: Mapped[str | None] = mapped_column(
+        String(50),
+        index=True,
+        nullable=True,
+    )
     title: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str] = mapped_column(String(500), nullable=False, default="")
     category: Mapped[str] = mapped_column(String(20), index=True, nullable=False)
@@ -35,6 +40,7 @@ class Recipe(Base):
         nullable=False,
         default="manual",
     )
+    source_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

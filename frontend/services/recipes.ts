@@ -3,6 +3,7 @@ import type {
   RecipeDeleteResponse,
   RecipeFavoriteResponse,
   RecipeHistoryResponse,
+  RecipeImageUploadResponse,
   RecipePayload,
   RecipeResponse,
   RecipePreferenceFilter,
@@ -102,6 +103,21 @@ export async function createRecipe(payload: RecipePayload) {
   });
 
   return response.recipe;
+}
+
+export async function uploadRecipeImage(file: File) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await apiRequest<RecipeImageUploadResponse>(
+    "/api/v1/recipes/image",
+    {
+      method: "POST",
+      body: formData,
+    },
+  );
+
+  return response;
 }
 
 export async function updateRecipe(recipeId: number, payload: RecipePayload) {

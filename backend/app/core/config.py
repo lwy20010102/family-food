@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     ai_base_url: str = "https://api.openai.com/v1"
     ai_model: str = ""
     ai_timeout_seconds: int = Field(default=30, ge=1, le=120)
+    supabase_url: str = ""
+    supabase_service_role_key: str = ""
+    supabase_storage_bucket: str = "recipe-images"
+    backend_public_url: str = ""
+    recipe_image_max_mb: int = Field(default=10, ge=1, le=25)
 
     @property
     def cors_origin_list(self) -> list[str]:

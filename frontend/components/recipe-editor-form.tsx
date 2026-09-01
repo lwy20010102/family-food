@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { FormEvent } from "react";
+import type { ChangeEvent, FormEvent } from "react";
 
 import type {
   RecipeCategory,
@@ -11,6 +11,7 @@ import type {
   RecipePayload,
   RecipeSourceType,
 } from "@/types/recipe";
+import { uploadRecipeImage } from "@/services/recipes";
 
 const categoryOptions: RecipeCategory[] = [
   "肉类",
@@ -199,6 +200,7 @@ export function RecipeEditorForm({
   );
   const [steps, setSteps] = useState<StepRow[]>(initialState.steps);
   const [loading, setLoading] = useState(false);
+  const [imageUploading, setImageUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -304,6 +306,27 @@ export function RecipeEditorForm({
     }
   }
 
+  async function handleImageUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) {
+      return;
+    }
+
+    setImageUploading(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const response = await uploadRecipeImage(file);
+      setImageUrl(response.image_url);
+      setSuccess("图片已上传");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "图片上传失败，请重试");
+    } finally {
+      setImageUploading(false);
+    }
+  }
+
   return (
     <form className="recipe-editor-form space-y-4" onSubmit={handleSubmit}>
       <div className="recipe-editor-basics grid gap-4 md:grid-cols-2">
@@ -375,7 +398,21 @@ export function RecipeEditorForm({
         </label>
 
         <label className="block md:col-span-2">
-          <span className="label">图片地址</span>
+          <span className="label">从手机相册选择图片</span>
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/gif"
+            onChange={handleImageUpload}
+            className="field"
+            disabled={imageUploading}
+          />
+          <span className="mt-2 block text-xs text-stone-500">
+            支持 JPG、PNG、WEBP、GIF，单张不超过 10 MB
+          </span>
+        </label>
+
+        <label className="block md:col-span-2">
+          <span className="label">图片地址（可选）</span>
           <input
             type="url"
             value={imageUrl}
@@ -383,6 +420,13 @@ export function RecipeEditorForm({
             className="field"
             placeholder="https://..."
           />
+          {imageUrl ? (
+            <img
+              src={imageUrl}
+              alt="菜谱图片预览"
+              className="mt-3 h-36 w-full rounded-xl object-cover"
+            />
+          ) : null}
         </label>
       </div>
 
@@ -546,8 +590,12 @@ export function RecipeEditorForm({
         </p>
       ) : null}
 
-      <button type="submit" disabled={loading} className="recipe-editor-submit button-primary w-full">
-        {loading ? "保存中..." : submitLabel}
+      <button
+        type="submit"
+        disabled={loading || imageUploading}
+        className="recipe-editor-submit button-primary w-full"
+      >
+        {imageUploading ? "图片上传中..." : loading ? "保存中..." : submitLabel}
       </button>
     </form>
   );
