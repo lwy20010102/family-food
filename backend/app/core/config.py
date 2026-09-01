@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     backend_cors_origins: str = Field(
         default="http://localhost:3000,http://127.0.0.1:3000"
     )
+    frontend_public_url: str = "https://family-food-ca2u2sq12-lwy20010102.vercel.app"
     auth_cookie_name: str = "family_food_access_token"
     auth_cookie_secure: bool = False
     auth_cookie_samesite: str = "lax"
@@ -38,11 +39,14 @@ class Settings(BaseSettings):
 
     @property
     def cors_origin_list(self) -> list[str]:
-        return [
+        origins = [
             origin.strip()
             for origin in self.backend_cors_origins.split(",")
             if origin.strip()
         ]
+        if self.frontend_public_url.strip() and self.frontend_public_url.strip() not in origins:
+            origins.append(self.frontend_public_url.strip().rstrip("/"))
+        return origins
 
 
 @lru_cache
