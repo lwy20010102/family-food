@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
@@ -27,14 +27,18 @@ def _user_public(user: User) -> UserPublic:
     return UserPublic.model_validate(user)
 
 
-def _set_auth_cookie(response: Response, token: str) -> None:
+def _set_auth_cookie(response: Response, token: str, request: Request) -> None:
     settings = get_settings()
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
+    is_https = request.url.scheme == "https" or forwarded_proto == "https"
+    secure = settings.auth_cookie_secure or is_https
+    samesite = "none" if is_https else settings.auth_cookie_samesite
     response.set_cookie(
         key=settings.auth_cookie_name,
         value=token,
         httponly=True,
-        secure=settings.auth_cookie_secure,
-        samesite=settings.auth_cookie_samesite,
+        secure=secure,
+        samesite=samesite,
         path=settings.auth_cookie_path,
         max_age=settings.access_token_expire_minutes * 60,
     )
@@ -44,6 +48,7 @@ def _set_auth_cookie(response: Response, token: str) -> None:
 def register(
     payload: RegisterRequest,
     response: Response,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> AuthSessionResponse:
     if get_user_by_username(db, payload.username) is not None:
@@ -59,7 +64,7 @@ def register(
 
     user = create_user(db, payload)
     token = create_access_token(str(user.id))
-    _set_auth_cookie(response, token)
+    _set_auth_cookie(response, token, request)
     return AuthSessionResponse(user=_user_public(user))
 
 
@@ -67,6 +72,7 @@ def register(
 def login(
     payload: LoginRequest,
     response: Response,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> AuthSessionResponse:
     user = authenticate_user(db, payload.email, payload.password)
@@ -77,7 +83,7 @@ def login(
         )
 
     token = create_access_token(str(user.id))
-    _set_auth_cookie(response, token)
+    _set_auth_cookie(response, token, request)
     return AuthSessionResponse(user=_user_public(user))
 
 
