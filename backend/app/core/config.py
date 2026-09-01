@@ -20,9 +20,12 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24 * 7
     backend_cors_origins: str = Field(
-        default="http://localhost:3000,http://127.0.0.1:3000"
+        default=(
+            "http://localhost:3000,http://127.0.0.1:3000,"
+            "https://family-food-ca2u2sq12-lwy20010102.vercel.app"
+        )
     )
-    frontend_public_url: str = "https://family-food-ca2u2sq12-lwy20010102.vercel.app"
+    frontend_public_url: str = "https://family-food-git-main-lwy20010102.vercel.app"
     auth_cookie_name: str = "family_food_access_token"
     auth_cookie_secure: bool = False
     auth_cookie_samesite: str = "lax"
