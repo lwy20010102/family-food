@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     app_name: str = "FamilyFood API"
     api_v1_prefix: str = "/api/v1"
     environment: str = "development"
+    # Render exposes RENDER=true automatically. Treat it as production even
+    # when ENVIRONMENT was not added manually in the service settings.
+    render: bool = False
     database_url: str = "sqlite:///./family_food.db"
     fallback_database_url: str = "sqlite:///./family_food.db"
     secret_key: str = "change-me"
