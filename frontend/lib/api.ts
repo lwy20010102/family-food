@@ -1,5 +1,9 @@
+// Production requests go through the Vercel rewrite so auth cookies stay
+// same-origin and the browser does not depend on Render CORS settings.
 export const apiBaseUrl =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8001";
+  process.env.NODE_ENV === "production"
+    ? ""
+    : process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8001";
 
 const API_REQUEST_TIMEOUT_MS = 15_000;
 
