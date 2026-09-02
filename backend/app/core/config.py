@@ -4,6 +4,12 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+KNOWN_FRONTEND_ORIGINS = (
+    "https://family-food-ca2u2sq12-lwy20010102.vercel.app",
+    "https://family-food-git-main-lwy20010102.vercel.app",
+)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -42,14 +48,15 @@ class Settings(BaseSettings):
 
     @property
     def cors_origin_list(self) -> list[str]:
-        origins = [
+        configured_origins = [
             origin.strip()
             for origin in self.backend_cors_origins.split(",")
             if origin.strip()
         ]
-        if self.frontend_public_url.strip() and self.frontend_public_url.strip() not in origins:
-            origins.append(self.frontend_public_url.strip().rstrip("/"))
-        return origins
+        configured_origins.extend(KNOWN_FRONTEND_ORIGINS)
+        if self.frontend_public_url.strip():
+            configured_origins.append(self.frontend_public_url.strip().rstrip("/"))
+        return list(dict.fromkeys(configured_origins))
 
 
 @lru_cache

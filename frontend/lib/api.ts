@@ -1,6 +1,8 @@
 export const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8001";
 
+const API_REQUEST_TIMEOUT_MS = 15_000;
+
 export function buildApiUrl(path: string) {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   return `${apiBaseUrl}${normalizedPath}`;
@@ -29,28 +31,55 @@ export async function apiRequest<T>(
     headers.set("Content-Type", "application/json");
   }
 
-  const response = await fetch(buildApiUrl(path), {
-    ...init,
-    credentials: "include",
-    headers,
-  });
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, API_REQUEST_TIMEOUT_MS);
+  const externalAbortHandler = () => controller.abort(init.signal?.reason);
 
-  const contentType = response.headers.get("content-type") ?? "";
-  const payload = contentType.includes("application/json")
-    ? await response.json()
-    : null;
-
-  if (!response.ok) {
-    const detail =
-      payload &&
-      typeof payload === "object" &&
-      "detail" in payload &&
-      typeof (payload as { detail?: unknown }).detail === "string"
-        ? (payload as { detail: string }).detail
-        : response.statusText || "请求失败";
-
-    throw new ApiError(detail, response.status, payload);
+  if (init.signal) {
+    if (init.signal.aborted) {
+      controller.abort(init.signal.reason);
+    } else {
+      init.signal.addEventListener("abort", externalAbortHandler, { once: true });
+    }
   }
 
-  return payload as T;
+  try {
+    const response = await fetch(buildApiUrl(path), {
+      ...init,
+      credentials: "include",
+      headers,
+      signal: controller.signal,
+    });
+
+    const contentType = response.headers.get("content-type") ?? "";
+    const payload = contentType.includes("application/json")
+      ? await response.json()
+      : null;
+
+    if (!response.ok) {
+      const detail =
+        payload &&
+        typeof payload === "object" &&
+        "detail" in payload &&
+        typeof (payload as { detail?: unknown }).detail === "string"
+          ? (payload as { detail: string }).detail
+          : response.statusText || "请求失败";
+
+      throw new ApiError(detail, response.status, payload);
+    }
+
+    return payload as T;
+  } catch (error) {
+    if (timedOut) {
+      throw new ApiError("后端连接超时，请检查网络或稍后重试", 408);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+    init.signal?.removeEventListener("abort", externalAbortHandler);
+  }
 }
