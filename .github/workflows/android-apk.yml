@@ -58,14 +58,28 @@ jobs:
         working-directory: frontend/android
         run: chmod +x gradlew
 
+      - name: Read app version
+        id: app_version
+        working-directory: frontend/android
+        shell: bash
+        run: |
+          version="$(sed -n 's/.*versionName "\([^"]*\)".*/\1/p' app/build.gradle | head -n 1)"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Building FamilyFood version $version"
+
       - name: Build debug APK
         working-directory: frontend/android
         run: ./gradlew assembleDebug
 
+      - name: Rename APK with version
+        working-directory: frontend/android
+        run: mv "app/build/outputs/apk/debug/app-debug.apk" "app/build/outputs/apk/debug/FamilyFood-v${{ steps.app_version.outputs.version }}-debug.apk"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: FamilyFood-android-debug
-          path: frontend/android/app/build/outputs/apk/debug/app-debug.apk
+          name: FamilyFood-android-v${{ steps.app_version.outputs.version }}
+          path: frontend/android/app/build/outputs/apk/debug/FamilyFood-v${{ steps.app_version.outputs.version }}-debug.apk
           if-no-files-found: error
           retention-days: 30
