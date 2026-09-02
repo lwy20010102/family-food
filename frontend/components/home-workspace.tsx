@@ -89,6 +89,53 @@ function getMenuState(menu: DailyMenu | null) {
   return menu.status === "confirmed" ? "已发布" : "待确认";
 }
 
+function isMeatRecipe(recipe: RecipeSummary) {
+  return recipe.category === "肉类" || recipe.category === "海鲜";
+}
+
+function isVegetableRecipe(recipe: RecipeSummary) {
+  return recipe.category === "蔬菜";
+}
+
+function buildBalancedRecommendations(
+  recipes: RecipeSummary[],
+  page: number,
+) {
+  if (!recipes.length) {
+    return [];
+  }
+
+  const meatRecipes = recipes.filter(isMeatRecipe);
+  const vegetableRecipes = recipes.filter(isVegetableRecipe);
+
+  // Keep the main pairing stable while rotating through each category.
+  if (meatRecipes.length && vegetableRecipes.length) {
+    const selected = [
+      meatRecipes[page % meatRecipes.length],
+      vegetableRecipes[page % vegetableRecipes.length],
+    ];
+    const selectedIds = new Set(selected.map((recipe) => recipe.id));
+    const supportingRecipes = recipes.filter(
+      (recipe) =>
+        !selectedIds.has(recipe.id) &&
+        (recipe.category === "汤" || recipe.category === "主食"),
+    );
+    const remainingRecipes = recipes.filter((recipe) => !selectedIds.has(recipe.id));
+    const extraPool = supportingRecipes.length ? supportingRecipes : remainingRecipes;
+
+    if (extraPool.length) {
+      selected.push(extraPool[page % extraPool.length]);
+    }
+
+    return selected;
+  }
+
+  const start = (page * 3) % recipes.length;
+  return Array.from({ length: Math.min(3, recipes.length) }, (_, index) =>
+    recipes[(start + index) % recipes.length],
+  );
+}
+
 export function HomeWorkspace() {
   const [user, setUser] = useState<User | null | undefined>(undefined);
   const [data, setData] = useState<HomeData>(emptyHomeData);
@@ -250,16 +297,10 @@ export function HomeWorkspace() {
       notification.type.startsWith("daily_menu") && !notification.is_read,
   );
   const recommendationPool = useMemo(() => data.recipes, [data.recipes]);
-  const tonightRecommendations = useMemo(() => {
-    if (!recommendationPool.length) {
-      return [];
-    }
-
-    const start = (recommendationPage * 3) % recommendationPool.length;
-    return Array.from({ length: Math.min(3, recommendationPool.length) }, (_, index) =>
-      recommendationPool[(start + index) % recommendationPool.length],
-    );
-  }, [recommendationPage, recommendationPool]);
+  const tonightRecommendations = useMemo(
+    () => buildBalancedRecommendations(recommendationPool, recommendationPage),
+    [recommendationPage, recommendationPool],
+  );
   const customRecipes = useMemo(() => {
     const keyword = customSearch.trim().toLocaleLowerCase("zh-CN");
     return data.recipes
@@ -659,7 +700,9 @@ function TonightDecisionCard({
       {mode === "recommend" ? (
         <div className="mt-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm font-medium text-stone-800">从菜谱库挑一组今晚的灵感</p>
+            <p className="text-sm font-medium text-stone-800">
+              优先搭配一道荤菜和一道素菜，再补一道汤或主食
+            </p>
             <button type="button" className="button-ghost button-sm" onClick={onShuffle}>
               <RotateCcwIcon className="mr-2 h-4 w-4" />
               换一批
