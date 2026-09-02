@@ -7,6 +7,12 @@ out/
 dist/
 coverage/
 
+# Capacitor / Android generated files
+frontend/android/.gradle/
+frontend/android/build/
+frontend/android/app/build/
+frontend/android/capacitor-cordova-android-plugins/
+
 # Python
 __pycache__/
 *.py[cod]
