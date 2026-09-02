@@ -5,9 +5,10 @@ const config: CapacitorConfig = {
   appName: "FamilyFood",
   webDir: "capacitor-web",
   server: {
-    // Keep the app connected to the deployed web app so future web releases
-    // become available without rebuilding the APK.
-    url: "https://family-food-git-main-lwy20010102.vercel.app",
+    // Use the project's stable Vercel domain instead of a branch deployment URL.
+    // Web releases remain available in the installed app without rebuilding it.
+    url: "https://family-food-lwy20010102.vercel.app",
+    errorPath: "error.html",
     cleartext: false,
   },
   android: {
