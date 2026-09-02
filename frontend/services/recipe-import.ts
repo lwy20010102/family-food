@@ -2,6 +2,7 @@ import { apiRequest } from "@/lib/api";
 import type {
   RecipeImportPreview,
   RecipeImportResult,
+  RecipeImportUndoResult,
 } from "@/types/recipe-import";
 
 export async function previewRecipeImport(file: File) {
@@ -11,6 +12,12 @@ export async function previewRecipeImport(file: File) {
   return apiRequest<RecipeImportPreview>("/api/v1/recipes/import/preview", {
     method: "POST",
     body: formData,
+  });
+}
+
+export async function undoRecipeImport(backupId: number) {
+  return apiRequest<RecipeImportUndoResult>(`/api/v1/recipes/import/undo/${backupId}`, {
+    method: "POST",
   });
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ArrowRightIcon,
@@ -9,25 +9,31 @@ import {
   NotificationsIcon,
   OrdersIcon,
   PlusIcon,
+  RotateCcwIcon,
+  SearchIcon,
   ShoppingListIcon,
 } from "@/components/icons";
+import { ApiError } from "@/lib/api";
 import { RecipeThumb } from "@/components/recipe-thumb";
 import { UserAvatar } from "@/components/user-avatar";
 import { WorkspaceShell } from "@/components/workspace-shell";
 import { getCurrentUser } from "@/services/auth";
-import { getTodayMenu } from "@/services/daily-menus";
+import { getTodayMenu, publishTodayMenu } from "@/services/daily-menus";
 import { getTodayDishOrders } from "@/services/dish-orders";
+import { getCurrentFamily } from "@/services/family";
 import { getNotifications } from "@/services/notifications";
 import { getRecipes } from "@/services/recipes";
 import { getTodayShoppingList } from "@/services/shopping-lists";
 import type { User } from "@/types/auth";
 import type { DailyMenu } from "@/types/daily-menu";
 import type { DishOrder } from "@/types/dish-order";
+import type { FamilyPublic } from "@/types/family";
 import type { Notification } from "@/types/notification";
 import type { RecipeSummary } from "@/types/recipe";
 import type { ShoppingList } from "@/types/shopping-list";
 
 type HomeData = {
+  family: FamilyPublic | null;
   menu: DailyMenu | null;
   orders: DishOrder[];
   recipes: RecipeSummary[];
@@ -36,7 +42,11 @@ type HomeData = {
   shoppingList: ShoppingList | null;
 };
 
+type HomeSection = "family" | "menu" | "orders" | "recipes" | "notifications" | "shopping";
+type HomeSectionErrors = Partial<Record<HomeSection, string>>;
+
 const emptyHomeData: HomeData = {
+  family: null,
   menu: null,
   orders: [],
   recipes: [],
@@ -51,12 +61,10 @@ const dateFormatter = new Intl.DateTimeFormat("zh-CN", {
   weekday: "long",
 });
 
-function getPromiseValue<T>(
-  result: PromiseSettledResult<T>,
-  fallback: T,
-): T {
-  return result.status === "fulfilled" ? result.value : fallback;
-}
+const homeSyncTimeFormatter = new Intl.DateTimeFormat("zh-CN", {
+  hour: "2-digit",
+  minute: "2-digit",
+});
 
 function groupOrders(orders: DishOrder[]) {
   const groups = new Map<number, { user: User; orders: DishOrder[] }>();
@@ -78,7 +86,7 @@ function getMenuState(menu: DailyMenu | null) {
     return "还没有确认";
   }
 
-  return menu.status === "confirmed" ? "已确认" : "待确认";
+  return menu.status === "confirmed" ? "已发布" : "待确认";
 }
 
 export function HomeWorkspace() {
@@ -86,10 +94,37 @@ export function HomeWorkspace() {
   const [data, setData] = useState<HomeData>(emptyHomeData);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [sectionErrors, setSectionErrors] = useState<HomeSectionErrors>({});
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastHomeSyncedAt, setLastHomeSyncedAt] = useState<Date | null>(null);
+  const [tonightMode, setTonightMode] = useState<"recommend" | "custom">("recommend");
+  const [recommendationPage, setRecommendationPage] = useState(0);
+  const [tonightSelectedIds, setTonightSelectedIds] = useState<number[]>([]);
+  const [tonightServings, setTonightServings] = useState(2);
+  const [customSearch, setCustomSearch] = useState("");
+  const [publishingTonight, setPublishingTonight] = useState(false);
+  const [tonightMessage, setTonightMessage] = useState<string | null>(null);
+  const [tonightError, setTonightError] = useState<string | null>(null);
+  const homeDataRef = useRef(data);
+  const homeRefreshInFlight = useRef(false);
+  const lastMenuVersionRef = useRef<string | null>(null);
 
-  const loadHome = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  useEffect(() => {
+    homeDataRef.current = data;
+  }, [data]);
+
+  const loadHome = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
+    if (homeRefreshInFlight.current) {
+      return;
+    }
+
+    homeRefreshInFlight.current = true;
+    if (silent) {
+      setIsRefreshing(true);
+    } else {
+      setLoading(true);
+      setError(null);
+    }
 
     try {
       const currentUser = await getCurrentUser();
@@ -97,11 +132,13 @@ export function HomeWorkspace() {
 
       if (!currentUser) {
         setData(emptyHomeData);
+        setSectionErrors({});
         return;
       }
 
-      const [menuResult, ordersResult, recipesResult, notificationsResult, shoppingResult] =
+      const [familyResult, menuResult, ordersResult, recipesResult, notificationsResult, shoppingResult] =
         await Promise.allSettled([
+          getCurrentFamily(),
           getTodayMenu(),
           getTodayDishOrders(),
           getRecipes(),
@@ -109,18 +146,22 @@ export function HomeWorkspace() {
           getTodayShoppingList(),
         ]);
 
-      const menuResponse = getPromiseValue(menuResult, { menu: null, orders: [] });
-      const orders = getPromiseValue(ordersResult, []);
-      const recipes = getPromiseValue(recipesResult, []);
-      const notificationsResponse = getPromiseValue(notificationsResult, {
-        notifications: [],
-        unread_count: 0,
-      });
-      const shoppingResponse = getPromiseValue(shoppingResult, {
-        shopping_list: null,
-        menu: null,
-      });
+      const previous = homeDataRef.current;
+      const menuResponse = menuResult.status === "fulfilled" ? menuResult.value : null;
+      const familyResponse = familyResult.status === "fulfilled" ? familyResult.value : null;
+      const orders = ordersResult.status === "fulfilled" ? ordersResult.value : null;
+      const recipes = recipesResult.status === "fulfilled" ? recipesResult.value : null;
+      const notificationsResponse = notificationsResult.status === "fulfilled" ? notificationsResult.value : null;
+      const shoppingResponse = shoppingResult.status === "fulfilled" ? shoppingResult.value : null;
+      const nextSectionErrors: HomeSectionErrors = {};
+      if (familyResult.status === "rejected") nextSectionErrors.family = "家庭信息加载失败";
+      if (menuResult.status === "rejected") nextSectionErrors.menu = "今日菜单加载失败";
+      if (ordersResult.status === "rejected") nextSectionErrors.orders = "点菜记录加载失败";
+      if (recipesResult.status === "rejected") nextSectionErrors.recipes = "菜谱推荐加载失败";
+      if (notificationsResult.status === "rejected") nextSectionErrors.notifications = "通知加载失败";
+      if (shoppingResult.status === "rejected") nextSectionErrors.shopping = "采购清单加载失败";
       const successfulRequests = [
+        familyResult,
         menuResult,
         ordersResult,
         recipesResult,
@@ -128,22 +169,41 @@ export function HomeWorkspace() {
         shoppingResult,
       ].filter((result) => result.status === "fulfilled").length;
 
+      const nextOrders = orders
+        ? orders.length
+          ? orders
+          : menuResponse?.orders ?? previous.orders
+        : previous.orders;
       setData({
-        menu: menuResponse.menu,
-        orders: orders.length ? orders : menuResponse.orders,
-        recipes,
-        notifications: notificationsResponse.notifications,
-        unreadCount: notificationsResponse.unread_count,
-        shoppingList: shoppingResponse.shopping_list,
+        family: familyResult.status === "fulfilled" ? familyResult.value.family : previous.family,
+        menu: menuResult.status === "fulfilled" ? menuResult.value.menu : previous.menu,
+        orders: nextOrders,
+        recipes: recipes ?? previous.recipes,
+        notifications: notificationsResponse?.notifications ?? previous.notifications,
+        unreadCount: notificationsResponse?.unread_count ?? previous.unreadCount,
+        shoppingList: shoppingResult.status === "fulfilled"
+          ? shoppingResult.value.shopping_list
+          : previous.shoppingList,
       });
+      setSectionErrors(nextSectionErrors);
 
       if (successfulRequests === 0) {
         setError("首页数据加载失败，请点击重试。");
+      } else if (!silent) {
+        setError(null);
+      }
+      if (successfulRequests > 0) {
+        setLastHomeSyncedAt(new Date());
       }
     } catch {
       setError("登录状态加载失败，请点击重试。");
     } finally {
-      setLoading(false);
+      homeRefreshInFlight.current = false;
+      if (silent) {
+        setIsRefreshing(false);
+      } else {
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -151,11 +211,100 @@ export function HomeWorkspace() {
     void loadHome();
   }, [loadHome]);
 
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    const refreshTimer = window.setInterval(() => {
+      void loadHome({ silent: true });
+    }, 30_000);
+
+    return () => window.clearInterval(refreshTimer);
+  }, [user, loadHome]);
+
+  useEffect(() => {
+    const version = data.menu ? `${data.menu.id}:${data.menu.updated_at}` : "none";
+    if (version === lastMenuVersionRef.current) {
+      return;
+    }
+    lastMenuVersionRef.current = version;
+    if (data.menu) {
+      setTonightSelectedIds(data.menu.items.map((item) => item.recipe_id));
+      setTonightServings(data.menu.servings);
+    }
+  }, [data.menu]);
+
   const groupedOrders = useMemo(() => groupOrders(data.orders), [data.orders]);
-  const recommendations = data.recipes.slice(0, 6);
   const purchasedCount = data.shoppingList?.items.filter((item) => item.is_purchased).length ?? 0;
   const shoppingCount = data.shoppingList?.items.length ?? 0;
   const today = dateFormatter.format(new Date());
+  const canPublishTonight = Boolean(
+    user && (!data.family || data.family.creator_id === user.id),
+  );
+  const isFamilyMember = Boolean(
+    user && data.family && data.family.creator_id !== user.id,
+  );
+  const latestMenuNotice = data.notifications.find(
+    (notification) =>
+      notification.type.startsWith("daily_menu") && !notification.is_read,
+  );
+  const recommendationPool = useMemo(() => data.recipes, [data.recipes]);
+  const tonightRecommendations = useMemo(() => {
+    if (!recommendationPool.length) {
+      return [];
+    }
+
+    const start = (recommendationPage * 3) % recommendationPool.length;
+    return Array.from({ length: Math.min(3, recommendationPool.length) }, (_, index) =>
+      recommendationPool[(start + index) % recommendationPool.length],
+    );
+  }, [recommendationPage, recommendationPool]);
+  const customRecipes = useMemo(() => {
+    const keyword = customSearch.trim().toLocaleLowerCase("zh-CN");
+    return data.recipes
+      .filter((recipe) => !keyword || recipe.title.toLocaleLowerCase("zh-CN").includes(keyword))
+      .slice(0, 8);
+  }, [customSearch, data.recipes]);
+
+  function toggleTonightRecipe(recipeId: number) {
+    setTonightMessage(null);
+    setTonightError(null);
+    setTonightSelectedIds((current) =>
+      current.includes(recipeId)
+        ? current.filter((id) => id !== recipeId)
+        : [...current, recipeId],
+    );
+  }
+
+  async function publishTonightMenu() {
+    if (!tonightSelectedIds.length) {
+      setTonightError("先选择至少一道菜，再发布今晚菜单。");
+      return;
+    }
+
+    setPublishingTonight(true);
+    setTonightError(null);
+    setTonightMessage(null);
+
+    try {
+      await publishTodayMenu({
+        recipe_ids: tonightSelectedIds,
+        servings: tonightServings,
+        meal_time: data.menu?.meal_time ?? "18:30",
+      });
+      setTonightMessage("今晚菜单已发布，家庭成员现在可以查看。");
+      await loadHome();
+    } catch (err) {
+      setTonightError(
+        err instanceof ApiError
+          ? err.message
+          : "发布今晚菜单失败，请稍后重试。",
+      );
+    } finally {
+      setPublishingTonight(false);
+    }
+  }
 
   return (
     <WorkspaceShell
@@ -226,13 +375,83 @@ export function HomeWorkspace() {
               </div>
             ) : null}
 
-            <section className="home-grid home-grid-primary">
-              <TodayMenuCard menu={data.menu} />
-              <ShoppingSummaryCard shoppingList={data.shoppingList} purchasedCount={purchasedCount} itemCount={shoppingCount} />
+            {Object.keys(sectionErrors).length ? (
+              <div className="home-partial-errors" role="status">
+                <span>
+                  {isRefreshing ? "正在同步部分家庭数据…" : "部分信息暂时加载失败，已保留上次数据。"}
+                </span>
+                <button type="button" className="button-secondary button-sm" onClick={() => void loadHome()}>
+                  重新加载
+                </button>
+              </div>
+            ) : null}
+
+            {lastHomeSyncedAt ? (
+              <div className="home-sync-meta" aria-live="polite">
+                <span>
+                  {isRefreshing
+                    ? "正在同步家庭数据…"
+                    : `最近同步 ${homeSyncTimeFormatter.format(lastHomeSyncedAt)}`}
+                </span>
+                <span className="home-sync-meta-muted">每 30 秒自动刷新</span>
+              </div>
+            ) : null}
+
+            {isFamilyMember ? (
+              <FamilyMemberTonightCard menu={data.menu} />
+            ) : (
+              <TonightDecisionCard
+                mode={tonightMode}
+                onModeChange={(mode) => {
+                  setTonightMode(mode);
+                  setTonightError(null);
+                  setTonightMessage(null);
+                }}
+                recommendationRecipes={tonightRecommendations}
+                customRecipes={customRecipes}
+                customSearch={customSearch}
+                onCustomSearchChange={setCustomSearch}
+                selectedRecipeIds={tonightSelectedIds}
+                servings={tonightServings}
+                onServingsChange={setTonightServings}
+                onToggleRecipe={toggleTonightRecipe}
+                onShuffle={() => {
+                  setRecommendationPage((current) => current + 1);
+                  setTonightError(null);
+                  setTonightMessage(null);
+                }}
+                onUseRecommendation={() => {
+                  setTonightSelectedIds(tonightRecommendations.map((recipe) => recipe.id));
+                  setTonightError(null);
+                  setTonightMessage(null);
+                }}
+                onPublish={publishTonightMenu}
+                canPublish={canPublishTonight}
+                publishing={publishingTonight}
+                message={tonightMessage}
+                error={tonightError}
+                recipeError={sectionErrors.recipes}
+                onRetryRecipes={() => void loadHome()}
+                menu={data.menu}
+              />
+            )}
+
+            {latestMenuNotice ? <SharedMenuNotice notification={latestMenuNotice} /> : null}
+
+            <section className={`home-grid home-grid-primary ${isFamilyMember ? "home-grid-member" : ""}`}>
+              {!isFamilyMember ? (
+                <TodayMenuCard menu={data.menu} error={sectionErrors.menu} onRetry={() => void loadHome()} />
+              ) : null}
+              <ShoppingSummaryCard
+                shoppingList={data.shoppingList}
+                purchasedCount={purchasedCount}
+                itemCount={shoppingCount}
+                error={sectionErrors.shopping}
+                onRetry={() => void loadHome()}
+              />
             </section>
 
-            <TodayOrdersCard groups={groupedOrders} />
-            <RecommendedRecipes recipes={recommendations} />
+            <TodayOrdersCard groups={groupedOrders} error={sectionErrors.orders} onRetry={() => void loadHome()} />
 
             <section className="home-quick-grid" aria-label="快捷功能">
               <Link href="/orders" className="home-quick-card">
@@ -277,7 +496,351 @@ export function HomeWorkspace() {
   );
 }
 
-function TodayMenuCard({ menu }: { menu: DailyMenu | null }) {
+function SharedMenuNotice({ notification }: { notification: Notification }) {
+  return (
+    <section className="home-shared-notice" aria-labelledby="shared-menu-notice-title">
+      <div className="home-shared-notice-copy">
+        <span className="home-shared-notice-mark" aria-hidden="true">!</span>
+        <div className="min-w-0">
+          <h2 id="shared-menu-notice-title" className="text-sm font-semibold text-emerald-950">
+            {notification.title}
+          </h2>
+          <p className="mt-1 text-sm leading-6 text-emerald-900/80">{notification.content}</p>
+        </div>
+      </div>
+      <Link href={notification.link_url ?? "/menu"} className="button-primary button-sm shrink-0">
+        查看今晚菜单
+      </Link>
+    </section>
+  );
+}
+
+function FamilyMemberTonightCard({ menu }: { menu: DailyMenu | null }) {
+  return (
+    <section className="section-card home-member-tonight-card" aria-labelledby="family-tonight-title">
+      <div className="section-head">
+        <div>
+          <p className="text-sm font-semibold text-emerald-700">家庭共享</p>
+          <h2 id="family-tonight-title" className="mt-1 text-2xl font-semibold tracking-tight text-stone-900">
+            今晚吃什么？
+          </h2>
+          <p className="section-description">家庭创建者发布后，你可以查看菜单并告诉家人偏好。</p>
+        </div>
+        <span className={`chip ${menu?.status === "confirmed" ? "chip-accent" : "chip-neutral"}`}>
+          {menu?.status === "confirmed" ? "已发布" : "等待发布"}
+        </span>
+      </div>
+
+      {menu?.items.length ? (
+        <div className="home-menu-list mt-5">
+          {menu.items.slice(0, 6).map((item) => (
+            <Link key={item.id} href={`/recipes/${item.recipe.id}`} className="home-menu-item">
+              <RecipeThumb
+                src={item.recipe.image_url}
+                title={item.recipe.title}
+                category={item.recipe.category}
+                variant="sm"
+                className="h-12 w-16 shrink-0 rounded-[10px]"
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block line-clamp-2 break-words font-medium text-stone-900">{item.recipe.title}</span>
+                <span className="mt-1 block text-xs text-stone-500">
+                  {item.recipe.cooking_time ? `${item.recipe.cooking_time} 分钟` : "时间待定"}
+                </span>
+              </span>
+              <span className="text-xs text-stone-400">查看</span>
+            </Link>
+          ))}
+        </div>
+      ) : (
+        <div className="home-empty-state mt-5">
+          <p className="font-medium text-stone-800">今晚菜单还没发布</p>
+          <p className="mt-1 text-sm leading-6 text-stone-500">发布后这里会自动同步，届时可以直接查看并反馈。</p>
+        </div>
+      )}
+
+      <div className="home-card-footer mt-4">
+        <span className="text-sm text-stone-500">
+          {menu?.items.length ? `${menu.items.length} 道菜 · ${menu.meal_time} 开饭 · ${menu.servings} 人份` : "等待家庭创建者安排"}
+        </span>
+        <Link href="/menu" className="button-primary button-sm">
+          打开家庭菜单
+        </Link>
+      </div>
+    </section>
+  );
+}
+
+type TonightDecisionCardProps = {
+  mode: "recommend" | "custom";
+  onModeChange: (mode: "recommend" | "custom") => void;
+  recommendationRecipes: RecipeSummary[];
+  customRecipes: RecipeSummary[];
+  customSearch: string;
+  onCustomSearchChange: (value: string) => void;
+  selectedRecipeIds: number[];
+  servings: number;
+  onServingsChange: (value: number) => void;
+  onToggleRecipe: (recipeId: number) => void;
+  onShuffle: () => void;
+  onUseRecommendation: () => void;
+  onPublish: () => void;
+  canPublish: boolean;
+  publishing: boolean;
+  message: string | null;
+  error: string | null;
+  recipeError?: string;
+  onRetryRecipes?: () => void;
+  menu: DailyMenu | null;
+};
+
+function TonightDecisionCard({
+  mode,
+  onModeChange,
+  recommendationRecipes,
+  customRecipes,
+  customSearch,
+  onCustomSearchChange,
+  selectedRecipeIds,
+  servings,
+  onServingsChange,
+  onToggleRecipe,
+  onShuffle,
+  onUseRecommendation,
+  onPublish,
+  canPublish,
+  publishing,
+  message,
+  error,
+  recipeError,
+  onRetryRecipes,
+  menu,
+}: TonightDecisionCardProps) {
+  return (
+    <section className="section-card tonight-decision-card" aria-labelledby="tonight-decision-title">
+      <div className="section-head">
+        <div>
+          <p className="text-sm font-semibold text-emerald-700">今晚的家庭安排</p>
+          <h2 id="tonight-decision-title" className="mt-1 text-2xl font-semibold tracking-tight text-stone-900">
+            今天晚上吃什么？
+          </h2>
+          <p className="section-description">
+            你来决定，发布后全家都能看到今晚菜单。
+          </p>
+        </div>
+        <span className={`chip ${menu?.status === "confirmed" ? "chip-accent" : "chip-neutral"}`}>
+          {menu?.status === "confirmed" ? "已发布 · 全家可见" : "还未发布"}
+        </span>
+      </div>
+
+      <div className="tonight-mode-switch" role="group" aria-label="选择安排方式">
+        <button
+          type="button"
+          className={mode === "recommend" ? "tonight-mode-button is-active" : "tonight-mode-button"}
+          onClick={() => onModeChange("recommend")}
+          aria-pressed={mode === "recommend"}
+        >
+          帮我推荐
+        </button>
+        <button
+          type="button"
+          className={mode === "custom" ? "tonight-mode-button is-active" : "tonight-mode-button"}
+          onClick={() => onModeChange("custom")}
+          aria-pressed={mode === "custom"}
+        >
+          自己安排
+        </button>
+      </div>
+
+      {recipeError ? (
+        <HomeSectionError message={recipeError} onRetry={onRetryRecipes} />
+      ) : null}
+
+      {mode === "recommend" ? (
+        <div className="mt-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-medium text-stone-800">从菜谱库挑一组今晚的灵感</p>
+            <button type="button" className="button-ghost button-sm" onClick={onShuffle}>
+              <RotateCcwIcon className="mr-2 h-4 w-4" />
+              换一批
+            </button>
+          </div>
+
+          {recommendationRecipes.length ? (
+            <div>
+              <div className="tonight-recommendation-grid">
+                {recommendationRecipes.map((recipe) => (
+                  <TonightRecipeOption
+                    key={recipe.id}
+                    recipe={recipe}
+                    reason={getRecommendationReason(recipe)}
+                    selected={selectedRecipeIds.includes(recipe.id)}
+                    onToggle={onToggleRecipe}
+                  />
+                ))}
+              </div>
+              <button type="button" className="button-secondary mt-3 w-full sm:w-auto" onClick={onUseRecommendation}>
+                使用这组菜单
+              </button>
+            </div>
+          ) : (
+            <div className="home-empty-state">
+              <p className="font-medium text-stone-800">菜谱库还没有可推荐的菜</p>
+              <p className="mt-1 text-sm leading-6 text-stone-500">先录入几道家常菜，之后就能快速安排今晚菜单。</p>
+              <Link href="/recipes/manual" className="button-primary button-sm mt-4">
+                录入菜谱
+              </Link>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="mt-5">
+          <label className="block">
+            <span className="sr-only">搜索要安排的菜谱</span>
+            <div className="relative">
+              <SearchIcon className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
+              <input
+                type="search"
+                value={customSearch}
+                onChange={(event) => onCustomSearchChange(event.target.value)}
+                className="field pl-11"
+                placeholder="搜索菜名，例如：番茄炒蛋"
+              />
+            </div>
+          </label>
+
+          {customRecipes.length ? (
+            <div className="tonight-custom-grid">
+              {customRecipes.map((recipe) => (
+                <TonightRecipeOption
+                  key={recipe.id}
+                  recipe={recipe}
+                  selected={selectedRecipeIds.includes(recipe.id)}
+                  onToggle={onToggleRecipe}
+                  compact
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="home-empty-state">
+              <p className="font-medium text-stone-800">没有找到匹配的菜谱</p>
+              <Link href="/recipes" className="button-secondary button-sm mt-4">
+                查看完整菜谱库
+              </Link>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="tonight-publish-bar">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-stone-900">
+            已选 {selectedRecipeIds.length} 道菜
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-2 text-xs text-stone-600">
+              <span>用餐人数</span>
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={servings}
+                onChange={(event) => onServingsChange(Number(event.target.value) || 1)}
+                className="field h-9 w-20 px-3 py-1.5 text-center"
+              />
+            </label>
+            <span className="text-xs text-stone-500">发布后家庭成员即可查看</span>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onPublish}
+          disabled={!canPublish || publishing || selectedRecipeIds.length === 0}
+          className="button-primary shrink-0"
+        >
+          {publishing
+            ? "发布中..."
+            : !canPublish
+              ? "仅管理员可发布"
+              : menu?.status === "confirmed"
+                ? "更新并发布"
+                : "确认并发布"}
+        </button>
+      </div>
+
+      {!canPublish ? (
+        <p className="mt-3 text-xs leading-5 text-stone-500">
+          你可以查看家庭菜单，但只有家庭创建者可以确认并发布今晚菜单。
+        </p>
+      ) : null}
+
+      {message ? <p className="mt-3 inline-message inline-message-success" role="status">{message}</p> : null}
+      {error ? <p className="mt-3 inline-message inline-message-error" role="alert">{error}</p> : null}
+    </section>
+  );
+}
+
+function TonightRecipeOption({
+  recipe,
+  reason,
+  selected,
+  onToggle,
+  compact = false,
+}: {
+  recipe: RecipeSummary;
+  reason?: string;
+  selected: boolean;
+  onToggle: (recipeId: number) => void;
+  compact?: boolean;
+}) {
+  return (
+    <div className={`tonight-recipe-option ${selected ? "is-selected" : ""} ${compact ? "is-compact" : ""}`}>
+      <button
+        type="button"
+        onClick={() => onToggle(recipe.id)}
+        aria-pressed={selected}
+        className="tonight-recipe-button"
+      >
+        <RecipeThumb
+          src={recipe.image_url}
+          title={recipe.title}
+          category={recipe.category}
+          variant={compact ? "sm" : "md"}
+          className={compact ? "h-14 w-16 shrink-0 rounded-[10px]" : "aspect-[4/3] rounded-[12px]"}
+        />
+        <span className="min-w-0 flex-1 text-left">
+          <span className="block line-clamp-2 break-words text-sm font-semibold text-stone-900">{recipe.title}</span>
+          <span className="mt-1 block text-xs text-stone-500">
+            {recipe.category}
+            {recipe.cooking_time ? ` · ${recipe.cooking_time} 分钟` : ""}
+          </span>
+          {reason ? <span className="mt-1 block text-xs font-medium text-emerald-700">{reason}</span> : null}
+        </span>
+        <span className={`tonight-select-mark ${selected ? "is-selected" : ""}`} aria-hidden="true">
+          {selected ? "已选" : "选择"}
+        </span>
+      </button>
+      <Link href={`/recipes/${recipe.id}`} className="tonight-recipe-detail">
+        查看详情
+      </Link>
+    </div>
+  );
+}
+
+function getRecommendationReason(recipe: RecipeSummary) {
+  return recipe.preference_reasons[0]
+    ?? (recipe.is_favorite ? "你收藏过" : recipe.cooking_time ? `${recipe.cooking_time} 分钟可完成` : "换换口味");
+}
+
+function TodayMenuCard({
+  menu,
+  error,
+  onRetry,
+}: {
+  menu: DailyMenu | null;
+  error?: string;
+  onRetry: () => void;
+}) {
   return (
     <section className="section-card home-menu-card">
       <div className="section-head">
@@ -289,6 +852,8 @@ function TodayMenuCard({ menu }: { menu: DailyMenu | null }) {
           {getMenuState(menu)}
         </span>
       </div>
+
+      {error ? <HomeSectionError message={error} onRetry={onRetry} /> : null}
 
       {menu?.items.length ? (
         <>
@@ -303,7 +868,7 @@ function TodayMenuCard({ menu }: { menu: DailyMenu | null }) {
                   className="h-12 w-16 shrink-0 rounded-[10px]"
                 />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium text-stone-900">{item.recipe.title}</span>
+                  <span className="block line-clamp-2 break-words font-medium text-stone-900">{item.recipe.title}</span>
                   <span className="mt-1 block text-xs text-stone-500">
                     {item.recipe.cooking_time ? `${item.recipe.cooking_time} 分钟` : "时间待定"}
                   </span>
@@ -314,7 +879,7 @@ function TodayMenuCard({ menu }: { menu: DailyMenu | null }) {
           </div>
           <div className="home-card-footer">
             <span className="text-sm text-stone-500">
-              {menu.items.length} 道菜 · 预计 {menu.servings} 人
+              {menu.items.length} 道菜 · {menu.meal_time} 开饭 · {menu.servings} 人份
             </span>
             <Link href="/menu" className="button-secondary button-sm">
               查看详情
@@ -338,10 +903,14 @@ function ShoppingSummaryCard({
   shoppingList,
   purchasedCount,
   itemCount,
+  error,
+  onRetry,
 }: {
   shoppingList: ShoppingList | null;
   purchasedCount: number;
   itemCount: number;
+  error?: string;
+  onRetry: () => void;
 }) {
   return (
     <section className="section-card home-shopping-card">
@@ -352,6 +921,8 @@ function ShoppingSummaryCard({
         </div>
         <MenuIcon className="h-5 w-5 text-emerald-600" />
       </div>
+
+      {error ? <HomeSectionError message={error} onRetry={onRetry} /> : null}
 
       {shoppingList && itemCount ? (
         <>
@@ -388,7 +959,15 @@ function ShoppingSummaryCard({
   );
 }
 
-function TodayOrdersCard({ groups }: { groups: Array<{ user: User; orders: DishOrder[] }> }) {
+function TodayOrdersCard({
+  groups,
+  error,
+  onRetry,
+}: {
+  groups: Array<{ user: User; orders: DishOrder[] }>;
+  error?: string;
+  onRetry: () => void;
+}) {
   return (
     <section className="section-card">
       <div className="section-head">
@@ -400,6 +979,8 @@ function TodayOrdersCard({ groups }: { groups: Array<{ user: User; orders: DishO
           查看全部
         </Link>
       </div>
+
+      {error ? <HomeSectionError message={error} onRetry={onRetry} /> : null}
 
       {groups.length ? (
         <div className="home-orders-list">
@@ -439,6 +1020,19 @@ function TodayOrdersCard({ groups }: { groups: Array<{ user: User; orders: DishO
   );
 }
 
+function HomeSectionError({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  return (
+    <div className="home-section-error" role="alert">
+      <span>{message}，请重试。</span>
+      {onRetry ? (
+        <button type="button" className="button-ghost button-sm" onClick={onRetry}>
+          重试
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function RecommendedRecipes({ recipes }: { recipes: RecipeSummary[] }) {
   return (
     <section className="section-card home-recommendations">
@@ -463,7 +1057,7 @@ function RecommendedRecipes({ recipes }: { recipes: RecipeSummary[] }) {
                 variant="md"
                 className="rounded-[12px]"
               />
-              <span className="mt-3 block truncate font-medium text-stone-900">{recipe.title}</span>
+              <span className="mt-3 block line-clamp-2 break-words font-medium text-stone-900">{recipe.title}</span>
               <span className="mt-1 block text-xs text-stone-500">
                 {recipe.cooking_time ? `${recipe.cooking_time} 分钟` : "时间待定"}
               </span>

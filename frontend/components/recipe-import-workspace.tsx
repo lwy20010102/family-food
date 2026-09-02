@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 
 import { RecipeThumb } from "@/components/recipe-thumb";
@@ -7,6 +8,7 @@ import { ApiError } from "@/lib/api";
 import {
   importRecipeWorkbook,
   previewRecipeImport,
+  undoRecipeImport,
 } from "@/services/recipe-import";
 import type {
   RecipeImportIssue,
@@ -21,7 +23,10 @@ export function RecipeImportWorkspace() {
   const [preview, setPreview] = useState<RecipeImportPreview | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [isUndoing, setIsUndoing] = useState(false);
+  const [confirmingImport, setConfirmingImport] = useState(false);
   const [importResult, setImportResult] = useState<RecipeImportResult | null>(null);
+  const [undoMessage, setUndoMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
 
   async function handlePreview() {
@@ -42,6 +47,8 @@ export function RecipeImportWorkspace() {
     setErrorMessage("");
     setPreview(null);
     setImportResult(null);
+    setUndoMessage(null);
+    setConfirmingImport(false);
     try {
       setPreview(await previewRecipeImport(file));
     } catch (error) {
@@ -57,10 +64,20 @@ export function RecipeImportWorkspace() {
     setFile(nextFile);
     setPreview(null);
     setImportResult(null);
+    setUndoMessage(null);
     setErrorMessage("");
+    setConfirmingImport(false);
   }
 
-  async function handleImport() {
+  function handleImport() {
+    if (!file || !preview || preview.errors.length) {
+      return;
+    }
+
+    setConfirmingImport(true);
+  }
+
+  async function handleConfirmedImport() {
     if (!file || !preview || preview.errors.length) {
       return;
     }
@@ -68,25 +85,43 @@ export function RecipeImportWorkspace() {
     const includeDrafts =
       preview.recipes_importable === 0 &&
       preview.recipes_draft === preview.recipes_total;
-    const confirmed = window.confirm(
-      includeDrafts
-        ? `确认将全部 ${preview.recipes_draft} 道草稿菜谱写入菜谱库吗？`
-        : `确认将 ${preview.recipes_importable} 道菜谱写入菜谱库吗？`,
-    );
-    if (!confirmed) {
-      return;
-    }
 
     setIsImporting(true);
     setErrorMessage("");
     try {
       setImportResult(await importRecipeWorkbook(file, includeDrafts));
+      setUndoMessage(null);
+      setConfirmingImport(false);
     } catch (error) {
       setErrorMessage(
         error instanceof ApiError ? error.message : "导入失败，请稍后再试。",
       );
     } finally {
       setIsImporting(false);
+    }
+  }
+
+  async function handleUndo() {
+    if (!importResult?.backup_id || isUndoing) {
+      return;
+    }
+
+    setIsUndoing(true);
+    setErrorMessage("");
+    try {
+      const result = await undoRecipeImport(importResult.backup_id);
+      setImportResult((current) =>
+        current ? { ...current, undo_available: false } : current,
+      );
+      setUndoMessage(
+        `已撤销「${result.filename}」：恢复 ${result.restored_count} 道，移除 ${result.removed_count} 道新菜谱。`,
+      );
+    } catch (error) {
+      setErrorMessage(
+        error instanceof ApiError ? error.message : "撤销失败，请稍后再试。",
+      );
+    } finally {
+      setIsUndoing(false);
     }
   }
 
@@ -112,7 +147,7 @@ export function RecipeImportWorkspace() {
             <input
               type="file"
               accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              className="min-w-0 flex-1 text-sm text-stone-600 file:mr-3 file:rounded-full file:border-0 file:bg-emerald-100 file:px-3 file:py-2 file:font-semibold file:text-emerald-800"
+              className="min-w-0 flex-1 text-sm text-emerald-950 file:mr-3 file:rounded-full file:border-0 file:bg-emerald-100 file:px-3 file:py-2 file:font-semibold file:text-emerald-900"
               onChange={(event) => handleFileChange(event.target.files?.[0] ?? null)}
             />
           </label>
@@ -149,6 +184,12 @@ export function RecipeImportWorkspace() {
           importResult={importResult}
           isImporting={isImporting}
           onImport={handleImport}
+          confirmingImport={confirmingImport}
+          onConfirmImport={handleConfirmedImport}
+          onCancelImport={() => setConfirmingImport(false)}
+          isUndoing={isUndoing}
+          onUndo={handleUndo}
+          undoMessage={undoMessage}
         />
       ) : null}
     </div>
@@ -160,11 +201,23 @@ function PreviewResult({
   importResult,
   isImporting,
   onImport,
+  confirmingImport,
+  onConfirmImport,
+  onCancelImport,
+  isUndoing,
+  onUndo,
+  undoMessage,
 }: {
   preview: RecipeImportPreview;
   importResult: RecipeImportResult | null;
   isImporting: boolean;
-  onImport: () => Promise<void>;
+  onImport: () => void;
+  confirmingImport: boolean;
+  onConfirmImport: () => Promise<void>;
+  onCancelImport: () => void;
+  isUndoing: boolean;
+  onUndo: () => Promise<void>;
+  undoMessage: string | null;
 }) {
   const issueCount = preview.errors.length + preview.warnings.length;
 
@@ -219,21 +272,57 @@ function PreviewResult({
                   : `将导入 ${preview.recipes_importable} 道菜谱`}
               </p>
               <p className="mt-1 text-xs leading-5 text-emerald-800">
-                导入会按 recipe_key 新增或更新，并同步替换对应的食材和步骤。
+                导入前会自动备份当前菜谱；导入会按 recipe_key 新增或更新，并同步替换对应的食材和步骤。导入完成后可一键撤销最近一次导入。
               </p>
             </div>
-            <button
-              type="button"
-              className="button-primary shrink-0"
-              disabled={isImporting}
-              onClick={onImport}
-            >
-              {isImporting ? "正在导入..." : "确认写入菜谱库"}
-            </button>
+            {confirmingImport ? (
+              <div className="recipe-import-confirm" role="group" aria-label="确认导入">
+                <p className="text-xs leading-5 text-amber-900">
+                  {preview.recipes_importable === 0
+                    ? `即将写入全部 ${preview.recipes_draft} 道草稿菜谱。`
+                    : `即将写入 ${preview.recipes_importable} 道菜谱。`}
+                  <br />导入前会自动备份，导入后可撤销。
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="button-primary button-sm"
+                    disabled={isImporting}
+                    onClick={() => void onConfirmImport()}
+                  >
+                    {isImporting ? "正在导入..." : "确认导入"}
+                  </button>
+                  <button
+                    type="button"
+                    className="button-ghost button-sm"
+                    disabled={isImporting}
+                    onClick={onCancelImport}
+                  >
+                    取消
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="button-primary shrink-0"
+                disabled={isImporting}
+                onClick={onImport}
+              >
+                {isImporting ? "正在导入..." : "确认写入菜谱库"}
+              </button>
+            )}
           </div>
         ) : null}
 
-        {importResult ? <ImportSuccess result={importResult} /> : null}
+        {importResult ? (
+          <ImportSuccess
+            result={importResult}
+            isUndoing={isUndoing}
+            onUndo={onUndo}
+            undoMessage={undoMessage}
+          />
+        ) : null}
 
         {!issueCount ? (
           <div className="inline-message inline-message-success mt-5">
@@ -262,8 +351,8 @@ function PreviewResult({
           ) : null}
         </div>
 
-        <div className="mt-5 overflow-x-auto rounded-[14px] border border-stone-200">
-          <table className="min-w-[760px] w-full border-collapse text-left text-sm">
+        <div className="recipe-preview-table-wrap mt-5 overflow-x-auto rounded-[14px] border border-stone-200">
+          <table className="recipe-preview-table min-w-[760px] w-full border-collapse text-left text-sm">
             <thead className="bg-stone-50 text-xs font-semibold text-stone-500">
               <tr>
                 <th className="px-3 py-3">图片</th>
@@ -278,30 +367,33 @@ function PreviewResult({
             <tbody className="divide-y divide-stone-100">
               {preview.recipes.map((recipe) => (
                 <tr key={recipe.recipe_key} className="align-middle">
-                  <td className="px-3 py-3">
+                  <td className="px-3 py-3" data-label="图片">
                     <RecipeThumb
                       src={recipe.image_url}
                       title={recipe.title}
                       category={recipe.category}
                       variant="sm"
+                      fit="contain"
                       className="w-16 shrink-0"
                     />
                   </td>
-                  <td className="px-3 py-3">
+                  <td className="px-3 py-3" data-label="菜名">
                     <p className="font-semibold text-stone-900">{recipe.title}</p>
-                    <p className="mt-1 text-xs text-stone-500">{recipe.recipe_key}</p>
+                    <p className="recipe-preview-key mt-1 text-xs text-stone-500">{recipe.recipe_key}</p>
                   </td>
-                  <td className="px-3 py-3 text-stone-600">{recipe.category || "未填写"}</td>
-                  <td className="px-3 py-3 text-stone-600">
+                  <td className="px-3 py-3 text-stone-600" data-label="分类">
+                    {recipe.category || "未填写"}
+                  </td>
+                  <td className="px-3 py-3 text-stone-600" data-label="人数">
                     {recipe.default_servings ? `${recipe.default_servings} 人` : "未填写"}
                   </td>
-                  <td className="px-3 py-3 text-stone-600">
+                  <td className="px-3 py-3 text-stone-600" data-label="时间">
                     {recipe.cooking_time ? `${recipe.cooking_time} 分钟` : "未标注"}
                   </td>
-                  <td className="px-3 py-3 text-stone-600">
+                  <td className="px-3 py-3 text-stone-600" data-label="明细">
                     {recipe.ingredient_count} 种食材 · {recipe.step_count} 步
                   </td>
-                  <td className="px-3 py-3">
+                  <td className="px-3 py-3" data-label="状态">
                     <span className={recipe.status === "可导入" ? "chip chip-success" : "chip chip-warning"}>
                       {recipe.status || "未填写"}
                     </span>
@@ -365,10 +457,42 @@ function canConfirmImport(preview: RecipeImportPreview) {
   );
 }
 
-function ImportSuccess({ result }: { result: RecipeImportResult }) {
+function ImportSuccess({
+  result,
+  isUndoing,
+  onUndo,
+  undoMessage,
+}: {
+  result: RecipeImportResult;
+  isUndoing: boolean;
+  onUndo: () => Promise<void>;
+  undoMessage: string | null;
+}) {
   return (
-    <div className="inline-message inline-message-success mt-5">
-      已成功导入 {result.imported_count} 道菜谱：新增 {result.created_count} 道，更新 {result.updated_count} 道。
+    <div className="recipe-import-success mt-5" role="status">
+      <div className="inline-message inline-message-success">
+        已成功导入 {result.imported_count} 道菜谱：新增 {result.created_count} 道，更新 {result.updated_count} 道。
+      </div>
+      {result.undo_available ? (
+        <div className="mt-3 flex flex-col gap-3 rounded-[12px] border border-amber-200 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold text-amber-950">已自动保存导入前备份</p>
+            <p className="mt-1 text-xs leading-5 text-amber-800">如果发现覆盖内容不正确，可以撤销本次最近导入。</p>
+          </div>
+          <button type="button" className="button-secondary shrink-0" onClick={onUndo} disabled={isUndoing}>
+            {isUndoing ? "撤销中..." : "一键撤销本次导入"}
+          </button>
+        </div>
+      ) : null}
+      <div className="recipe-import-next-actions">
+        <p className="text-sm font-semibold text-stone-900">下一步</p>
+        <p className="mt-1 text-xs leading-5 text-stone-500">导入的菜谱已经可以直接用于安排今晚菜单。</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Link href="/recipes" className="button-secondary button-sm">查看菜谱库</Link>
+          <Link href="/menu" className="button-primary button-sm">安排今晚菜单</Link>
+        </div>
+      </div>
+      {undoMessage ? <div className="inline-message inline-message-success mt-3">{undoMessage}</div> : null}
     </div>
   );
 }

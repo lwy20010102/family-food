@@ -53,4 +53,12 @@ export type RecipeImportResult = {
   created_count: number;
   updated_count: number;
   items: RecipeImportResultItem[];
+  backup_id: number | null;
+  undo_available: boolean;
+};
+
+export type RecipeImportUndoResult = {
+  filename: string;
+  restored_count: number;
+  removed_count: number;
 };

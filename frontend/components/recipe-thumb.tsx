@@ -8,6 +8,11 @@ type RecipeThumbProps = {
   category: string;
   className?: string;
   variant?: "sm" | "md" | "lg";
+  /**
+   * `contain` keeps the whole plate and dish visible. Use `cover` only when
+   * a deliberate edge-to-edge crop is preferred for a specific surface.
+   */
+  fit?: "cover" | "contain";
 };
 
 const variantClasses: Record<NonNullable<RecipeThumbProps["variant"]>, string> = {
@@ -22,6 +27,7 @@ export function RecipeThumb({
   category,
   className,
   variant = "sm",
+  fit = "contain",
 }: RecipeThumbProps) {
   const [failed, setFailed] = useState(false);
 
@@ -32,7 +38,10 @@ export function RecipeThumb({
   const hasImage = Boolean(src) && !failed;
 
   return (
-    <div className={`recipe-thumb ${variantClasses[variant]} ${className ?? ""}`.trim()}>
+    <div
+      className={`recipe-thumb ${variantClasses[variant]} ${className ?? ""}`.trim()}
+      data-fit={fit}
+    >
       {hasImage ? (
         <img
           src={src ?? undefined}
@@ -40,7 +49,7 @@ export function RecipeThumb({
           loading="lazy"
           decoding="async"
           onError={() => setFailed(true)}
-          className="h-full w-full object-cover"
+          className="h-full w-full"
         />
       ) : (
         <div className="recipe-thumb-fallback">

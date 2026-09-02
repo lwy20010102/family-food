@@ -8,12 +8,16 @@ def init_db() -> None:
     from app.models import (  # noqa: F401
         DailyMenu,
         DailyMenuItem,
+        DailyMenuFeedback,
+        DailyMenuView,
+        DailyMenuVersion,
         DietaryPreference,
         DishOrder,
         Family,
         FamilyMember,
         Notification,
         Recipe,
+        RecipeImportBackup,
         RecipeFavorite,
         RecipeIngredient,
         RecipeStep,
@@ -27,6 +31,7 @@ def init_db() -> None:
     engine = get_engine()
     Base.metadata.create_all(bind=engine)
     _ensure_recipe_import_columns(engine)
+    _ensure_daily_menu_columns(engine)
 
 
 def _ensure_recipe_import_columns(engine) -> None:
@@ -47,3 +52,17 @@ def _ensure_recipe_import_columns(engine) -> None:
             )
         if "source_url" not in columns:
             connection.execute(text("ALTER TABLE recipes ADD COLUMN source_url VARCHAR(500)"))
+
+
+def _ensure_daily_menu_columns(engine) -> None:
+    """Add the meal time field to databases created before the shared menu card."""
+    inspector = inspect(engine)
+    if "daily_menus" not in inspector.get_table_names():
+        return
+
+    columns = {column["name"] for column in inspector.get_columns("daily_menus")}
+    if "meal_time" not in columns:
+        with engine.begin() as connection:
+            connection.execute(
+                text("ALTER TABLE daily_menus ADD COLUMN meal_time VARCHAR(5) NOT NULL DEFAULT '18:30'")
+            )

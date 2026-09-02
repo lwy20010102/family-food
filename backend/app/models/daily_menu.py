@@ -36,6 +36,9 @@ class DailyMenu(Base):
         default="draft",
     )
     servings: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    meal_time: Mapped[str] = mapped_column(
+        String(5), nullable=False, default="18:30"
+    )
     confirmed_by_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"),
         index=True,
@@ -64,6 +67,17 @@ class DailyMenu(Base):
         back_populates="menu",
         cascade="all, delete-orphan",
         order_by="DailyMenuItem.sort_order",
+    )
+    views = relationship(
+        "DailyMenuView",
+        back_populates="menu",
+        cascade="all, delete-orphan",
+    )
+    versions = relationship(
+        "DailyMenuVersion",
+        back_populates="menu",
+        cascade="all, delete-orphan",
+        order_by="DailyMenuVersion.version_number.desc()",
     )
 
 

@@ -19,6 +19,7 @@ import {
   RecipesIcon,
   StatisticsIcon,
 } from "@/components/icons";
+import { getNotifications } from "@/services/notifications";
 
 type WorkspaceAction = {
   href: string;
@@ -78,6 +79,7 @@ const navItems: NavItem[] = [
   {
     href: "/notifications",
     label: "通知",
+    mobileLabel: "消息",
     icon: <NotificationsIcon className="h-4 w-4" />,
     match: (pathname) => pathname.startsWith("/notifications"),
   },
@@ -91,6 +93,7 @@ const navItems: NavItem[] = [
   {
     href: "/family",
     label: "我的",
+    mobileLabel: "我的",
     icon: <FamilyIcon className="h-4 w-4" />,
     match: (pathname) => pathname.startsWith("/family"),
   },
@@ -115,6 +118,7 @@ export function WorkspaceShell({
 }: WorkspaceShellProps) {
   const pathname = usePathname();
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
+  const [mobileUnreadCount, setMobileUnreadCount] = useState(0);
   const activeItems = navItems.map((item) => ({
     ...item,
     active: isActiveItem(item, pathname),
@@ -123,21 +127,45 @@ export function WorkspaceShell({
     (item) =>
       item.href === "/" ||
       item.href === "/recipes" ||
-      item.href === "/orders" ||
-      item.href === "/menu",
+      item.href === "/notifications" ||
+      item.href === "/family",
   );
   const mobileMoreItems = activeItems.filter(
     (item) =>
+      item.href === "/orders" ||
+      item.href === "/menu" ||
       item.href === "/weekly-menu" ||
-      item.href === "/notifications" ||
       item.href === "/statistics" ||
-      item.href === "/family",
+      item.href === "/recipes/manual",
   );
   const mobileMoreActive = mobileMoreItems.some((item) => item.active);
 
   useEffect(() => {
     setMobileMoreOpen(false);
   }, [pathname]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadUnreadCount = async () => {
+      try {
+        const response = await getNotifications();
+        if (active) {
+          setMobileUnreadCount(response.unread_count);
+        }
+      } catch {
+        // Logged-out pages and offline sessions simply show no badge.
+      }
+    };
+
+    void loadUnreadCount();
+    const intervalId = window.setInterval(() => void loadUnreadCount(), 30000);
+
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+    };
+  }, []);
 
   return (
     <div className="workspace-shell">
@@ -162,7 +190,7 @@ export function WorkspaceShell({
                 className="workspace-nav-link"
               >
                 <span className="workspace-nav-icon">{item.icon}</span>
-                <span>{item.mobileLabel ?? item.label}</span>
+                <span>{item.label}</span>
               </Link>
             ))}
           </nav>
@@ -236,15 +264,15 @@ export function WorkspaceShell({
                 className="mobile-nav-link"
               >
                 <span className="mobile-nav-icon">{item.icon}</span>
-                <span>{item.label}</span>
+                <span>{item.mobileLabel ?? item.label}</span>
               </Link>
             ))}
 
-            <Link href="/recipes/manual" className="mobile-nav-center" aria-label="录入菜谱">
+            <Link href="/menu" className="mobile-nav-center" aria-label="安排今晚菜单">
               <span className="mobile-nav-center-bubble">
                 <PlusIcon className="h-5 w-5" />
               </span>
-              <span>录入</span>
+              <span>今晚</span>
             </Link>
 
             {mobilePrimaryItems.slice(2).map((item) => (
@@ -254,8 +282,19 @@ export function WorkspaceShell({
                 data-active={item.active}
                 className="mobile-nav-link"
               >
-                <span className="mobile-nav-icon">{item.icon}</span>
-                <span>{item.label}</span>
+                <span className="mobile-nav-icon">
+                  {item.href === "/notifications" && mobileUnreadCount ? (
+                    <span className="mobile-nav-badge" aria-hidden="true">
+                      {mobileUnreadCount > 99 ? "99+" : mobileUnreadCount}
+                    </span>
+                  ) : null}
+                  {item.icon}
+                </span>
+                <span>
+                  {item.href === "/notifications" && mobileUnreadCount
+                    ? `消息（${mobileUnreadCount}）`
+                    : item.label}
+                </span>
               </Link>
             ))}
 
@@ -287,7 +326,7 @@ export function WorkspaceShell({
             <div className="mobile-more-sheet-head">
               <div>
                 <p className="mobile-more-sheet-title">更多功能</p>
-                <p className="mobile-more-sheet-description">把周计划、通知和个人设置放在这里。</p>
+                <p className="mobile-more-sheet-description">把点菜、今日菜单和周计划放在这里。</p>
               </div>
               <button
                 type="button"
@@ -313,11 +352,17 @@ export function WorkspaceShell({
                     <small>
                       {item.href === "/weekly-menu"
                         ? "提前安排一周三餐"
-                        : item.href === "/notifications"
-                          ? "查看新的家庭消息"
-                          : item.href === "/statistics"
-                            ? "回顾饮食参与情况"
-                            : "管理个人与家庭空间"}
+                        : item.href === "/orders"
+                          ? "快速添加今晚想吃的菜"
+                          : item.href === "/menu"
+                            ? "确认并发布家庭菜单"
+                          : item.href === "/notifications"
+                            ? "查看新的家庭消息"
+                            : item.href === "/statistics"
+                              ? "回顾饮食参与情况"
+                              : item.href === "/recipes/manual"
+                                ? "录入一道新的家常菜"
+                              : "管理个人与家庭空间"}
                     </small>
                   </span>
                 </Link>

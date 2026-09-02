@@ -7,7 +7,13 @@ import { useRouter } from "next/navigation";
 import { BookmarkIcon, SearchIcon } from "@/components/icons";
 import { RecipeThumb } from "@/components/recipe-thumb";
 import { ApiError } from "@/lib/api";
-import { createRecipe, getRecipes, setRecipeFavorite } from "@/services/recipes";
+import {
+  createRecipe,
+  getRecipeHistory,
+  getRecipes,
+  setRecipeFavorite,
+} from "@/services/recipes";
+import { createDishOrders, getTodayDishOrders } from "@/services/dish-orders";
 import type {
   RecipeCategory,
   RecipePreferenceFilter,
@@ -38,6 +44,11 @@ export function RecipeListWorkspace() {
     useState<RecipePreferenceFilter>("all");
   const [reloadToken, setReloadToken] = useState(0);
   const [favoriteBusyId, setFavoriteBusyId] = useState<number | null>(null);
+  const [todayOrderRecipeIds, setTodayOrderRecipeIds] = useState<number[]>([]);
+  const [orderBusyId, setOrderBusyId] = useState<number | null>(null);
+  const [orderMessage, setOrderMessage] = useState<string | null>(null);
+  const [sortMode, setSortMode] = useState<"default" | "favorite" | "recent">("default");
+  const [recentRecipeIds, setRecentRecipeIds] = useState<number[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -78,6 +89,30 @@ export function RecipeListWorkspace() {
     };
   }, [search, category, preferenceFilter, reloadToken]);
 
+  useEffect(() => {
+    let active = true;
+
+    void (async () => {
+      try {
+        const [orders, history] = await Promise.all([
+          getTodayDishOrders(),
+          getRecipeHistory(),
+        ]);
+        if (!active) {
+          return;
+        }
+        setTodayOrderRecipeIds(Array.from(new Set(orders.map((order) => order.recipe_id))));
+        setRecentRecipeIds(history.map((item) => item.recipe.id));
+      } catch {
+        // The recipe library remains usable if today's shared state is unavailable.
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const recipeCount = useMemo(() => recipes.length, [recipes]);
 
   async function handleToggleFavorite(
@@ -106,6 +141,47 @@ export function RecipeListWorkspace() {
       setFavoriteBusyId(null);
     }
   }
+
+  async function handleAddToTonight(
+    event: React.MouseEvent<HTMLButtonElement>,
+    recipe: RecipeSummary,
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (todayOrderRecipeIds.includes(recipe.id)) {
+      return;
+    }
+
+    setOrderBusyId(recipe.id);
+    setError(null);
+    setOrderMessage(null);
+    try {
+      const orders = await createDishOrders({ recipe_ids: [recipe.id] });
+      setTodayOrderRecipeIds(Array.from(new Set(orders.map((order) => order.recipe_id))));
+      setOrderMessage(`已把「${recipe.title}」加入今晚候选菜单。`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "加入今晚菜单失败，请重试");
+    } finally {
+      setOrderBusyId(null);
+    }
+  }
+
+  const visibleRecipes = useMemo(() => {
+    if (sortMode === "default") {
+      return recipes;
+    }
+
+    const recentIndex = new Map(recentRecipeIds.map((id, index) => [id, index]));
+    return [...recipes].sort((left, right) => {
+      if (sortMode === "favorite" && left.is_favorite !== right.is_favorite) {
+        return left.is_favorite ? -1 : 1;
+      }
+
+      const leftIndex = recentIndex.get(left.id) ?? Number.MAX_SAFE_INTEGER;
+      const rightIndex = recentIndex.get(right.id) ?? Number.MAX_SAFE_INTEGER;
+      return leftIndex - rightIndex;
+    });
+  }, [recipes, recentRecipeIds, sortMode]);
 
   return (
     <section className="recipe-list-layout grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
@@ -152,6 +228,7 @@ export function RecipeListWorkspace() {
                 key={item}
                 type="button"
                 onClick={() => setCategory(item)}
+                aria-pressed={category === item}
                 className={`recipe-category-pill ${
                   category === item
                     ? "bg-emerald-600 text-white shadow-sm"
@@ -177,6 +254,7 @@ export function RecipeListWorkspace() {
                   key={value}
                   type="button"
                   onClick={() => setPreferenceFilter(value)}
+                  aria-pressed={preferenceFilter === value}
                   className="recipe-preference-filter"
                   data-active={preferenceFilter === value}
                 >
@@ -185,6 +263,42 @@ export function RecipeListWorkspace() {
               ))}
             </div>
           </div>
+
+          <div className="recipe-sort-toolbar" aria-label="菜谱排序">
+            <span className="recipe-preference-filter-label">优先显示</span>
+            {(
+              [
+                ["default", "默认"],
+                ["favorite", "我的收藏"],
+                ["recent", "最近浏览"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className="recipe-sort-button"
+                data-active={sortMode === value}
+                aria-pressed={sortMode === value}
+                onClick={() => setSortMode(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {orderMessage ? (
+            <div className="recipe-order-message" role="status">
+              <span>{orderMessage}</span>
+              <Link href="/menu" className="button-secondary button-sm">去确认菜单</Link>
+            </div>
+          ) : todayOrderRecipeIds.length ? (
+            <div className="recipe-order-message recipe-order-message-muted" role="status">
+              已有 {todayOrderRecipeIds.length} 道今晚候选菜，选好后可以去确认菜单。
+              <Link href="/menu" className="button-ghost button-sm">去确认</Link>
+            </div>
+          ) : null}
+
+          <p className="sr-only" aria-live="polite">当前显示 {recipes.length} 道菜谱</p>
 
           {loading ? (
             <RecipeGridSkeleton />
@@ -212,7 +326,7 @@ export function RecipeListWorkspace() {
             </div>
           ) : (
             <div className="recipe-library-grid">
-              {recipes.map((recipe) => (
+              {visibleRecipes.map((recipe) => (
                 <article
                   key={recipe.id}
                   className="recipe-library-card group"
@@ -275,6 +389,20 @@ export function RecipeListWorkspace() {
                       ) : null}
                     </div>
                   </Link>
+
+                  <button
+                    type="button"
+                    className={`recipe-add-order-button ${todayOrderRecipeIds.includes(recipe.id) ? "is-added" : ""}`}
+                    onClick={(event) => void handleAddToTonight(event, recipe)}
+                    disabled={todayOrderRecipeIds.includes(recipe.id) || orderBusyId === recipe.id}
+                    aria-pressed={todayOrderRecipeIds.includes(recipe.id)}
+                  >
+                    {orderBusyId === recipe.id
+                      ? "加入中..."
+                      : todayOrderRecipeIds.includes(recipe.id)
+                        ? "已加入今晚"
+                        : "加入今晚菜单"}
+                  </button>
                 </article>
               ))}
             </div>

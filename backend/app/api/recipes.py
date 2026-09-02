@@ -20,7 +20,11 @@ from app.schemas.recipe import (
     RecipesResponse,
     RecipeUpdateRequest,
 )
-from app.schemas.recipe_import import RecipeImportPreview, RecipeImportResult
+from app.schemas.recipe_import import (
+    RecipeImportPreview,
+    RecipeImportResult,
+    RecipeImportUndoResult,
+)
 from app.services.family_service import get_user_workspace
 from app.services.dietary_preference_service import (
     RecipePreferenceMatch,
@@ -45,6 +49,7 @@ from app.services.recipe_import_service import (
     build_recipe_import_records,
     import_recipe_records,
     preview_recipe_workbook,
+    undo_recipe_import,
 )
 from app.services.recipe_image_service import store_recipe_image
 from app.core.config import get_settings
@@ -243,6 +248,29 @@ def import_recipes_from_workbook(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="菜谱导入失败，数据库没有被修改",
+        ) from exc
+
+
+@router.post("/import/undo/{backup_id}", response_model=RecipeImportUndoResult)
+def undo_recipe_import_endpoint(
+    backup_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> RecipeImportUndoResult:
+    family_id = _get_family_id(db, current_user)
+    try:
+        return undo_recipe_import(db, family_id, backup_id, current_user.id)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="撤销导入失败，请稍后重试",
         ) from exc
 
 

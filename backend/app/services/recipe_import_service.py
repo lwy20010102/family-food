@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from io import BytesIO
 from typing import Any
 
 from openpyxl import load_workbook
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.models.recipe import Recipe
+from app.models.recipe_import_backup import RecipeImportBackup
 from app.schemas.recipe import (
     RecipeCreateRequest,
     RecipeIngredientBase,
@@ -20,6 +22,7 @@ from app.schemas.recipe_import import (
     RecipeImportPreviewItem,
     RecipeImportResult,
     RecipeImportResultItem,
+    RecipeImportUndoResult,
 )
 from app.services.recipe_service import (
     _apply_recipe_fields,
@@ -527,9 +530,21 @@ def import_recipe_records(
     records: list[RecipeImportRecord],
     filename: str,
 ) -> RecipeImportResult:
+    backup = RecipeImportBackup(
+        family_id=family_id,
+        creator_id=creator_id,
+        filename=filename,
+        snapshot_json=_snapshot_existing_recipes(db, family_id, records),
+        created_recipe_ids=[],
+        imported_count=len(records),
+    )
+    db.add(backup)
+    db.flush()
+
     result_items: list[RecipeImportResultItem] = []
     created_count = 0
     updated_count = 0
+    created_recipe_ids: list[int] = []
 
     for record in records:
         statement = select(Recipe).where(
@@ -570,6 +585,9 @@ def import_recipe_records(
         _apply_recipe_fields(recipe, record.data)
         _replace_ingredients(recipe, record.data)
         _replace_steps(recipe, record.data)
+        if action == "created":
+            db.flush()
+            created_recipe_ids.append(recipe.id)
         result_items.append(
             RecipeImportResultItem(
                 recipe_key=record.recipe_key,
@@ -580,6 +598,7 @@ def import_recipe_records(
             )
         )
 
+    backup.created_recipe_ids = created_recipe_ids
     db.commit()
     updated_count = len(result_items) - created_count
     return RecipeImportResult(
@@ -588,7 +607,311 @@ def import_recipe_records(
         created_count=created_count,
         updated_count=updated_count,
         items=result_items,
+        backup_id=backup.id,
+        undo_available=True,
     )
+
+
+def undo_recipe_import(
+    db: Session,
+    family_id: int,
+    backup_id: int,
+    creator_id: int,
+) -> RecipeImportUndoResult:
+    backup = db.execute(
+        select(RecipeImportBackup).where(
+            RecipeImportBackup.id == backup_id,
+            RecipeImportBackup.family_id == family_id,
+        )
+    ).scalar_one_or_none()
+    if backup is None:
+        raise ValueError("找不到这次导入记录")
+    if backup.creator_id != creator_id:
+        raise ValueError("只有发起导入的人可以撤销这次导入")
+    if backup.is_undone:
+        raise ValueError("这次导入已经撤销过了")
+
+    latest_backup_id = db.execute(
+        select(RecipeImportBackup.id)
+        .where(
+            RecipeImportBackup.family_id == family_id,
+            RecipeImportBackup.is_undone.is_(False),
+        )
+        .order_by(RecipeImportBackup.id.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if latest_backup_id != backup.id:
+        raise ValueError("为避免覆盖更新，当前只能撤销最近一次导入")
+
+    created_recipe_ids = {int(recipe_id) for recipe_id in backup.created_recipe_ids}
+    references = _find_recipe_references(db, family_id, created_recipe_ids)
+    if references:
+        titles = {
+            recipe_id: title
+            for recipe_id, title in db.execute(
+                select(Recipe.id, Recipe.title).where(Recipe.id.in_(references))
+            ).all()
+        }
+        details = []
+        for recipe_id, reference_types in sorted(references.items()):
+            title = titles.get(recipe_id, f"菜谱 #{recipe_id}")
+            details.append(f"「{title}」（{'、'.join(sorted(reference_types))}）")
+        raise ValueError(
+            "本次导入新增的菜谱已经被使用，不能撤销："
+            + "；".join(details)
+            + "。请先移除相关记录后再撤销。"
+        )
+
+    restored_count = 0
+    for snapshot in backup.snapshot_json:
+        recipe_id = int(snapshot["id"])
+        recipe = _load_recipe_for_backup(db, family_id, recipe_id)
+        if recipe is None:
+            continue
+
+        _restore_recipe_from_snapshot(recipe, snapshot)
+        restored_count += 1
+
+    removed_count = 0
+    for recipe_id in created_recipe_ids:
+        recipe = db.execute(
+            select(Recipe).where(
+                Recipe.id == int(recipe_id),
+                Recipe.family_id == family_id,
+            )
+        ).scalar_one_or_none()
+        if recipe is not None:
+            db.delete(recipe)
+            removed_count += 1
+
+    if backup.snapshot_json:
+        db.flush()
+        _refresh_today_shopping_list_if_needed(
+            db,
+            family_id,
+            {int(snapshot["id"]) for snapshot in backup.snapshot_json},
+        )
+
+    backup.is_undone = True
+    backup.undone_at = datetime.now()
+    db.commit()
+    return RecipeImportUndoResult(
+        filename=backup.filename,
+        restored_count=restored_count,
+        removed_count=removed_count,
+    )
+
+
+def _find_recipe_references(
+    db: Session,
+    family_id: int,
+    recipe_ids: set[int],
+) -> dict[int, set[str]]:
+    """Find live and historical records that would be deleted with a recipe."""
+    if not recipe_ids:
+        return {}
+
+    from app.models.daily_menu import DailyMenu, DailyMenuItem
+    from app.models.daily_menu_feedback import DailyMenuFeedback
+    from app.models.daily_menu_version import DailyMenuVersion
+    from app.models.dish_order import DishOrder
+    from app.models.recipe_activity import RecipeFavorite, RecipeViewHistory
+    from app.models.weekly_menu import WeeklyMenuItem
+
+    references: dict[int, set[str]] = {}
+
+    def record(rows, label: str) -> None:
+        for recipe_id in rows:
+            references.setdefault(int(recipe_id), set()).add(label)
+
+    record(
+        db.execute(
+            select(DishOrder.recipe_id).where(
+                DishOrder.family_id == family_id,
+                DishOrder.recipe_id.in_(recipe_ids),
+            )
+        ).scalars(),
+        "点菜记录",
+    )
+    record(
+        db.execute(
+            select(DailyMenuItem.recipe_id)
+            .join(DailyMenu, DailyMenu.id == DailyMenuItem.daily_menu_id)
+            .where(
+                DailyMenu.family_id == family_id,
+                DailyMenuItem.recipe_id.in_(recipe_ids),
+            )
+        ).scalars(),
+        "今日菜单",
+    )
+    record(
+        db.execute(
+            select(WeeklyMenuItem.recipe_id).where(
+                WeeklyMenuItem.family_id == family_id,
+                WeeklyMenuItem.recipe_id.in_(recipe_ids),
+            )
+        ).scalars(),
+        "周菜单",
+    )
+    record(
+        db.execute(
+            select(DailyMenuFeedback.recipe_id).where(
+                DailyMenuFeedback.family_id == family_id,
+                DailyMenuFeedback.recipe_id.in_(recipe_ids),
+            )
+        ).scalars(),
+        "成员反馈",
+    )
+    record(
+        db.execute(
+            select(RecipeFavorite.recipe_id).where(
+                RecipeFavorite.recipe_id.in_(recipe_ids),
+            )
+        ).scalars(),
+        "收藏记录",
+    )
+    record(
+        db.execute(
+            select(RecipeViewHistory.recipe_id).where(
+                RecipeViewHistory.recipe_id.in_(recipe_ids),
+            )
+        ).scalars(),
+        "浏览记录",
+    )
+
+    versions = db.execute(select(DailyMenuVersion).where(DailyMenuVersion.family_id == family_id)).scalars()
+    for version in versions:
+        for recipe_id in version.recipe_ids or []:
+            try:
+                normalized_recipe_id = int(recipe_id)
+            except (TypeError, ValueError):
+                continue
+            if normalized_recipe_id in recipe_ids:
+                references.setdefault(normalized_recipe_id, set()).add("今日菜单历史版本")
+
+    return references
+
+
+def _refresh_today_shopping_list_if_needed(
+    db: Session,
+    family_id: int,
+    restored_recipe_ids: set[int],
+) -> None:
+    """Refresh today's generated list when an imported recipe was restored."""
+    from app.models.daily_menu import DailyMenu, DailyMenuItem
+    from app.models.family import Family
+    from app.models.recipe import Recipe
+    from app.services.shopping_list_service import rebuild_today_shopping_list
+
+    today_menu = db.execute(
+        select(DailyMenu)
+        .options(
+            selectinload(DailyMenu.items)
+            .selectinload(DailyMenuItem.recipe)
+            .selectinload(Recipe.ingredients)
+        )
+        .where(
+            DailyMenu.family_id == family_id,
+            DailyMenu.menu_date == datetime.now().date(),
+            DailyMenu.status == "confirmed",
+        )
+    ).unique().scalar_one_or_none()
+    if today_menu is None or not any(
+        item.recipe_id in restored_recipe_ids for item in today_menu.items
+    ):
+        return
+
+    family = db.get(Family, family_id)
+    if family is not None:
+        rebuild_today_shopping_list(db, family, today_menu)
+
+
+def _snapshot_existing_recipes(
+    db: Session,
+    family_id: int,
+    records: list[RecipeImportRecord],
+) -> list[dict]:
+    keys = {record.recipe_key for record in records}
+    image_urls = {record.data.image_url for record in records if record.data.image_url}
+    statement = (
+        select(Recipe)
+        .options(selectinload(Recipe.ingredients), selectinload(Recipe.steps))
+        .where(Recipe.family_id == family_id)
+    )
+    recipes = db.execute(statement).unique().scalars().all()
+    return [
+        _serialize_recipe_snapshot(recipe)
+        for recipe in recipes
+        if recipe.recipe_key in keys
+        or (recipe.recipe_key is None and recipe.image_url in image_urls)
+    ]
+
+
+def _serialize_recipe_snapshot(recipe: Recipe) -> dict:
+    return {
+        "id": recipe.id,
+        "family_id": recipe.family_id,
+        "creator_id": recipe.creator_id,
+        "recipe_key": recipe.recipe_key,
+        "title": recipe.title,
+        "description": recipe.description,
+        "category": recipe.category,
+        "image_url": recipe.image_url,
+        "default_servings": recipe.default_servings,
+        "cooking_time": recipe.cooking_time,
+        "difficulty": recipe.difficulty,
+        "tips": list(recipe.tips or []),
+        "source_type": recipe.source_type,
+        "source_url": recipe.source_url,
+        "ingredients": [
+            {
+                "name": item.name,
+                "amount": item.amount,
+                "unit": item.unit,
+                "type": item.type,
+                "sort_order": item.sort_order,
+            }
+            for item in recipe.ingredients
+        ],
+        "steps": [
+            {
+                "step_number": step.step_number,
+                "description": step.description,
+                "duration": step.duration,
+            }
+            for step in recipe.steps
+        ],
+    }
+
+
+def _load_recipe_for_backup(db: Session, family_id: int, recipe_id: int) -> Recipe | None:
+    statement = (
+        select(Recipe)
+        .options(selectinload(Recipe.ingredients), selectinload(Recipe.steps))
+        .where(Recipe.id == recipe_id, Recipe.family_id == family_id)
+    )
+    return db.execute(statement).unique().scalar_one_or_none()
+
+
+def _restore_recipe_from_snapshot(recipe: Recipe, snapshot: dict) -> None:
+    data = RecipeCreateRequest(
+        title=snapshot["title"],
+        description=snapshot["description"],
+        category=snapshot["category"],
+        image_url=snapshot["image_url"],
+        default_servings=snapshot["default_servings"],
+        cooking_time=snapshot["cooking_time"],
+        difficulty=snapshot["difficulty"],
+        tips=snapshot["tips"],
+        source_type=snapshot["source_type"],
+        source_url=snapshot["source_url"],
+        ingredients=snapshot["ingredients"],
+        steps=snapshot["steps"],
+    )
+    _apply_recipe_fields(recipe, data)
+    recipe.recipe_key = snapshot["recipe_key"]
+    _replace_ingredients(recipe, data)
+    _replace_steps(recipe, data)
 
 
 def _read_rows(worksheet: Any) -> tuple[list[tuple[int, dict[str, Any]]], set[str]]:

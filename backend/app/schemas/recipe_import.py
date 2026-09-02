@@ -63,3 +63,11 @@ class RecipeImportResult(BaseModel):
     created_count: int = 0
     updated_count: int = 0
     items: list[RecipeImportResultItem] = Field(default_factory=list)
+    backup_id: int | None = None
+    undo_available: bool = False
+
+
+class RecipeImportUndoResult(BaseModel):
+    filename: str
+    restored_count: int = 0
+    removed_count: int = 0

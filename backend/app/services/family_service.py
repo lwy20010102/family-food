@@ -150,9 +150,14 @@ def add_member_to_family(db: Session, family: Family, user: User) -> Family:
 def migrate_personal_workspace(db: Session, user_id: int, family_id: int) -> None:
     """Move personal data into a newly selected family without touching shared data."""
     from app.models.daily_menu import DailyMenu, DailyMenuItem
+    from app.models.daily_menu_feedback import DailyMenuFeedback
+    from app.models.daily_menu_view import DailyMenuView
+    from app.models.daily_menu_version import DailyMenuVersion
     from app.models.dish_order import DishOrder
     from app.models.recipe import Recipe
+    from app.models.recipe_import_backup import RecipeImportBackup
     from app.models.shopping_list import ShoppingList, ShoppingListItem
+    from app.models.weekly_menu import WeeklyMenuItem
 
     personal_id = db.execute(
         select(Family.id).where(
@@ -170,6 +175,52 @@ def migrate_personal_workspace(db: Session, user_id: int, family_id: int) -> Non
         DishOrder.family_id == personal_id,
         DishOrder.user_id == user_id,
     ).update({DishOrder.family_id: family_id}, synchronize_session=False)
+    db.query(RecipeImportBackup).filter(
+        RecipeImportBackup.family_id == personal_id,
+    ).update({RecipeImportBackup.family_id: family_id}, synchronize_session=False)
+
+    source_weekly_items = list(
+        db.execute(
+            select(WeeklyMenuItem)
+            .where(WeeklyMenuItem.family_id == personal_id)
+            .order_by(WeeklyMenuItem.id)
+        ).scalars()
+    )
+    for source_item in source_weekly_items:
+        duplicate_id = db.execute(
+            select(WeeklyMenuItem.id).where(
+                WeeklyMenuItem.family_id == family_id,
+                WeeklyMenuItem.menu_date == source_item.menu_date,
+                WeeklyMenuItem.meal_type == source_item.meal_type,
+                WeeklyMenuItem.recipe_id == source_item.recipe_id,
+            )
+        ).scalar_one_or_none()
+        if duplicate_id is not None:
+            db.delete(source_item)
+        else:
+            source_item.family_id = family_id
+
+    source_feedbacks = list(
+        db.execute(
+            select(DailyMenuFeedback).where(
+                DailyMenuFeedback.family_id == personal_id,
+                DailyMenuFeedback.user_id == user_id,
+            )
+        ).scalars()
+    )
+    for source_feedback in source_feedbacks:
+        duplicate = db.execute(
+            select(DailyMenuFeedback.id).where(
+                DailyMenuFeedback.family_id == family_id,
+                DailyMenuFeedback.user_id == source_feedback.user_id,
+                DailyMenuFeedback.recipe_id == source_feedback.recipe_id,
+                DailyMenuFeedback.feedback_date == source_feedback.feedback_date,
+            )
+        ).scalar_one_or_none()
+        if duplicate is not None:
+            db.delete(source_feedback)
+        else:
+            source_feedback.family_id = family_id
 
     source_menus = list(
         db.execute(
@@ -189,6 +240,12 @@ def migrate_personal_workspace(db: Session, user_id: int, family_id: int) -> Non
         ).scalar_one_or_none()
         if target_menu is None:
             source_menu.family_id = family_id
+            db.query(DailyMenuView).filter(
+                DailyMenuView.daily_menu_id == source_menu.id,
+            ).update({DailyMenuView.family_id: family_id}, synchronize_session=False)
+            db.query(DailyMenuVersion).filter(
+                DailyMenuVersion.daily_menu_id == source_menu.id,
+            ).update({DailyMenuVersion.family_id: family_id}, synchronize_session=False)
             continue
 
         target_recipe_ids = {item.recipe_id for item in target_menu.items}
@@ -201,6 +258,48 @@ def migrate_personal_workspace(db: Session, user_id: int, family_id: int) -> Non
                         sort_order=len(target_menu.items),
                     )
                 )
+        source_views = list(
+            db.execute(
+                select(DailyMenuView).where(
+                    DailyMenuView.daily_menu_id == source_menu.id,
+                )
+            ).scalars()
+        )
+        target_view_user_ids = set(
+            db.execute(
+                select(DailyMenuView.user_id).where(
+                    DailyMenuView.daily_menu_id == target_menu.id,
+                )
+            ).scalars()
+        )
+        for source_view in source_views:
+            if source_view.user_id in target_view_user_ids:
+                db.delete(source_view)
+            else:
+                source_view.daily_menu_id = target_menu.id
+                source_view.family_id = family_id
+                target_view_user_ids.add(source_view.user_id)
+
+        source_versions = list(
+            db.execute(
+                select(DailyMenuVersion)
+                .where(DailyMenuVersion.daily_menu_id == source_menu.id)
+                .order_by(DailyMenuVersion.version_number.asc(), DailyMenuVersion.id.asc())
+            ).scalars()
+        )
+        next_version_number = db.execute(
+            select(DailyMenuVersion.version_number)
+            .where(DailyMenuVersion.daily_menu_id == target_menu.id)
+            .order_by(DailyMenuVersion.version_number.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        next_version_number = int(next_version_number or 0) + 1
+        for source_version in source_versions:
+            source_version.daily_menu_id = target_menu.id
+            source_version.family_id = family_id
+            source_version.version_number = next_version_number
+            next_version_number += 1
+
         db.delete(source_menu)
 
     source_lists = list(
