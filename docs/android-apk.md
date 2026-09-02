@@ -1,7 +1,8 @@
 # Android APK
 
-The Android project is in `frontend/android`. It wraps the deployed FamilyFood
-web app so the existing Render API and Supabase data remain unchanged.
+The Android project is in `frontend/android`. It loads the FamilyFood web app
+through the existing Render service, so the existing API and Supabase data
+remain unchanged even when a phone cannot connect directly to Vercel.
 
 ## Build with GitHub Actions
 
@@ -41,6 +42,7 @@ frontend/android/app/build/outputs/apk/debug/app-debug.apk
 Install it on an Android phone with Android Studio, or copy the APK to the phone
 and allow installation from that file manager when Android asks.
 
-The app currently loads the deployed Vercel site. Future web deployments become
-available in the installed app without rebuilding the APK. The phone still needs
-internet access for login and synchronized family data.
+The app loads the deployed web app through `family-food-api.onrender.com`.
+Future web deployments become available in the installed app without rebuilding
+the APK. The phone still needs internet access for login and synchronized family
+data.

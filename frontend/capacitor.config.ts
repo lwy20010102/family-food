@@ -5,9 +5,9 @@ const config: CapacitorConfig = {
   appName: "FamilyFood",
   webDir: "capacitor-web",
   server: {
-    // Use the project's stable Vercel domain instead of a branch deployment URL.
-    // Web releases remain available in the installed app without rebuilding it.
-    url: "https://family-food-lwy20010102.vercel.app",
+    // Load through the existing Render API service. It proxies the web app so
+    // phones that cannot connect to Vercel can still use the APK.
+    url: "https://family-food-api.onrender.com",
     errorPath: "error.html",
     cleartext: false,
   },

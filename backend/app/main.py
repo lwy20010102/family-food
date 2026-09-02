@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -18,6 +18,7 @@ from app.api.weekly_menus import router as weekly_menus_router
 from app.core.config import get_settings
 from app.database.init_db import init_db
 from app.services.recipe_image_service import LOCAL_RECIPE_IMAGE_DIR
+from app.services.frontend_proxy import proxy_frontend_request
 
 
 @asynccontextmanager
@@ -65,12 +66,15 @@ def create_app() -> FastAPI:
     app.include_router(shopping_lists_router, prefix=settings.api_v1_prefix)
     app.include_router(weekly_menus_router, prefix=settings.api_v1_prefix)
 
-    @app.get("/")
-    def root() -> dict[str, str]:
-        return {
-            "name": settings.app_name,
-            "status": "running",
-        }
+    @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
+    async def root(request: Request):
+        return await proxy_frontend_request(request, "")
+
+    @app.api_route("/{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+    async def frontend_proxy(path: str, request: Request):
+        if path.startswith("api/") or path.startswith("media/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        return await proxy_frontend_request(request, path)
 
     return app
 

@@ -7,6 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 KNOWN_FRONTEND_ORIGINS = (
     "https://family-food-ca2u2sq12-lwy20010102.vercel.app",
     "https://family-food-git-main-lwy20010102.vercel.app",
+    "https://family-food-lwy20010102.vercel.app",
 )
 
 
@@ -34,7 +35,8 @@ class Settings(BaseSettings):
             "https://family-food-ca2u2sq12-lwy20010102.vercel.app"
         )
     )
-    frontend_public_url: str = "https://family-food-git-main-lwy20010102.vercel.app"
+    frontend_public_url: str = "https://family-food-lwy20010102.vercel.app"
+    frontend_upstream_url: str = "https://family-food-lwy20010102.vercel.app"
     auth_cookie_name: str = "family_food_access_token"
     auth_cookie_secure: bool = False
     auth_cookie_samesite: str = "lax"
