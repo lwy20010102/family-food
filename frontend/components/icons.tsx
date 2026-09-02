@@ -301,3 +301,13 @@ export function TrashIcon({ className }: IconProps) {
     </IconShell>
   );
 }
+
+export function DownloadIcon({ className }: IconProps) {
+  return (
+    <IconShell className={className}>
+      <path d="M12 4.5v10" />
+      <path d="m8.5 11 3.5 3.5 3.5-3.5" />
+      <path d="M5.5 18.5h13" />
+    </IconShell>
+  );
+}

@@ -19,6 +19,7 @@ import {
   RecipesIcon,
   StatisticsIcon,
 } from "@/components/icons";
+import { InstallAppButton } from "@/components/install-app-button";
 import { getNotifications } from "@/services/notifications";
 
 type WorkspaceAction = {
@@ -244,8 +245,11 @@ export function WorkspaceShell({
                       ) : null}
                     </Link>
                   ))}
+                  <InstallAppButton />
                 </div>
-              ) : null}
+              ) : (
+                <InstallAppButton />
+              )}
             </div>
           </header>
 

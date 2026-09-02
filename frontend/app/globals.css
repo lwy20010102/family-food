@@ -464,6 +464,19 @@ code {
     @apply absolute -right-1 -top-1 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold leading-4 text-white;
   }
 
+  .workspace-install-wrap {
+    @apply relative shrink-0;
+  }
+
+  .workspace-install-button {
+    @apply whitespace-nowrap;
+  }
+
+  .workspace-install-hint {
+    @apply absolute right-0 top-[calc(100%+0.5rem)] z-20 w-64 rounded-[12px] border border-emerald-200 bg-white px-3 py-2 text-xs leading-5 text-stone-600;
+    box-shadow: var(--ff-shadow-soft);
+  }
+
   .home-page {
     @apply space-y-5;
   }

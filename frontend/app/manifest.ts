@@ -7,6 +7,7 @@ export default function manifest(): MetadataRoute.Manifest {
     description: "记录菜谱、安排菜单和整理采购清单。",
     start_url: "/",
     display: "standalone",
+    display_override: ["standalone", "minimal-ui"],
     background_color: "#f4f7f2",
     theme_color: "#15803d",
     orientation: "portrait-primary",
