@@ -60,7 +60,14 @@ class FamilyMember(Base):
         index=True,
         nullable=False,
     )
+    # Permission role stays separate from the member's meal responsibility.
     role: Mapped[str] = mapped_column(String(20), nullable=False)
+    meal_role: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="diner",
+        server_default="diner",
+    )
     nickname: Mapped[str] = mapped_column(String(50), nullable=False)
     joined_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

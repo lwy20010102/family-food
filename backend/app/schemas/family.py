@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.schemas.auth import UserPublic
 
 FamilyRole = Literal["owner", "member"]
+MealRole = Literal["diner", "cook"]
 
 
 class FamilyPublic(BaseModel):
@@ -26,6 +27,7 @@ class FamilyMemberPublic(BaseModel):
 
     id: int
     role: FamilyRole
+    meal_role: MealRole
     nickname: str
     joined_at: datetime
     user: UserPublic
@@ -37,6 +39,10 @@ class CreateFamilyRequest(BaseModel):
 
 class JoinFamilyRequest(BaseModel):
     invite_code: str = Field(min_length=4, max_length=16)
+
+
+class UpdateMealRoleRequest(BaseModel):
+    meal_role: MealRole
 
 
 class CurrentFamilyResponse(BaseModel):

@@ -490,6 +490,26 @@ code {
     @apply border-emerald-200 bg-emerald-50/30;
   }
 
+  .meal-role-options {
+    @apply mt-5 grid gap-3 sm:grid-cols-2;
+  }
+
+  .meal-role-option {
+    @apply flex min-h-20 flex-col items-start justify-center rounded-[14px] border border-stone-200 bg-stone-50 px-4 py-3 text-left transition hover:border-emerald-200 hover:bg-emerald-50/50 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .meal-role-option.is-active {
+    @apply border-emerald-500 bg-emerald-50 ring-2 ring-emerald-100;
+  }
+
+  .meal-role-option-title {
+    @apply text-sm font-semibold text-stone-900;
+  }
+
+  .meal-role-option-description {
+    @apply mt-1 text-xs leading-5 text-stone-500;
+  }
+
   .home-partial-errors,
   .home-section-error {
     @apply flex flex-wrap items-center justify-between gap-2 rounded-[12px] border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900;
@@ -996,6 +1016,18 @@ code {
 
   .profile-member-row {
     @apply flex min-w-0 items-start justify-between gap-3 py-4 first:pt-0 last:pb-0;
+  }
+
+  .profile-member-badges {
+    @apply flex shrink-0 flex-wrap justify-end gap-2;
+  }
+
+  .profile-member-role-control {
+    @apply block;
+  }
+
+  .profile-member-role-select {
+    @apply min-h-8 w-auto min-w-[92px] px-2 py-1 text-xs;
   }
 
   .profile-personal-icon {
@@ -2094,7 +2126,7 @@ code {
       @apply flex-col;
     }
 
-    .profile-member-row > .chip {
+    .profile-member-badges {
       @apply ml-12;
     }
 

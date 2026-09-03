@@ -2,8 +2,10 @@ import { apiRequest } from "@/lib/api";
 import type {
   CurrentFamilyResponse,
   CreateFamilyPayload,
+  FamilyMember,
   FamilyMembersResponse,
   JoinFamilyPayload,
+  UpdateMealRolePayload,
 } from "@/types/family";
 
 export async function getCurrentFamily() {
@@ -37,4 +39,27 @@ export async function getFamilyMembers() {
   );
 
   return response.members;
+}
+
+export async function updateMyMealRole(payload: UpdateMealRolePayload) {
+  return apiRequest<FamilyMember>(
+    "/api/v1/families/members/me/meal-role",
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function updateFamilyMemberMealRole(
+  memberId: number,
+  payload: UpdateMealRolePayload,
+) {
+  return apiRequest<FamilyMember>(
+    `/api/v1/families/members/${memberId}/meal-role`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    },
+  );
 }

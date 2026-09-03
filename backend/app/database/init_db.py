@@ -32,6 +32,7 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _ensure_recipe_import_columns(engine)
     _ensure_daily_menu_columns(engine)
+    _ensure_family_member_columns(engine)
 
 
 def _ensure_recipe_import_columns(engine) -> None:
@@ -65,4 +66,21 @@ def _ensure_daily_menu_columns(engine) -> None:
         with engine.begin() as connection:
             connection.execute(
                 text("ALTER TABLE daily_menus ADD COLUMN meal_time VARCHAR(5) NOT NULL DEFAULT '18:30'")
+            )
+
+
+def _ensure_family_member_columns(engine) -> None:
+    """Add meal responsibilities to family members created by older releases."""
+    inspector = inspect(engine)
+    if "family_members" not in inspector.get_table_names():
+        return
+
+    columns = {column["name"] for column in inspector.get_columns("family_members")}
+    if "meal_role" not in columns:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "ALTER TABLE family_members "
+                    "ADD COLUMN meal_role VARCHAR(20) NOT NULL DEFAULT 'diner'"
+                )
             )

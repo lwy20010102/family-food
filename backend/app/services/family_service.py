@@ -151,6 +151,7 @@ def create_family_for_user(db: Session, owner: User, name: str) -> Family:
             family_id=family.id,
             user_id=owner.id,
             role="owner",
+            meal_role="diner",
             nickname=owner.username.strip(),
         )
     )
@@ -183,12 +184,55 @@ def add_member_to_family(db: Session, family: Family, user: User) -> Family:
             family_id=family.id,
             user_id=user.id,
             role="member",
+            meal_role="diner",
             nickname=user.username.strip(),
         )
     )
     migrate_personal_workspace(db, user.id, family.id)
     db.commit()
     return load_family_by_id(db, family.id) or family
+
+
+def update_user_meal_role(db: Session, user_id: int, meal_role: str) -> FamilyMember:
+    membership = get_user_membership(db, user_id)
+    if membership is None:
+        raise ValueError("请先加入家庭")
+
+    return _save_meal_role(db, membership, meal_role)
+
+
+def update_family_member_meal_role(
+    db: Session,
+    actor_user_id: int,
+    member_id: int,
+    meal_role: str,
+) -> FamilyMember:
+    if meal_role not in {"diner", "cook"}:
+        raise ValueError("家庭身份无效")
+
+    actor_membership = get_user_membership(db, actor_user_id)
+    if actor_membership is None:
+        raise ValueError("请先加入家庭")
+
+    family = db.get(Family, actor_membership.family_id)
+    if family is None or family.creator_id != actor_user_id:
+        raise PermissionError("只有家庭创建者可以设置成员身份")
+
+    member = db.get(FamilyMember, member_id)
+    if member is None or member.family_id != family.id:
+        raise LookupError("家庭成员不存在")
+
+    return _save_meal_role(db, member, meal_role)
+
+
+def _save_meal_role(db: Session, member: FamilyMember, meal_role: str) -> FamilyMember:
+    if meal_role not in {"diner", "cook"}:
+        raise ValueError("家庭身份无效")
+
+    member.meal_role = meal_role
+    db.commit()
+    db.refresh(member)
+    return member
 
 
 def migrate_personal_workspace(db: Session, user_id: int, family_id: int) -> None:

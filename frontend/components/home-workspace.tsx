@@ -27,13 +27,14 @@ import { getTodayShoppingList } from "@/services/shopping-lists";
 import type { User } from "@/types/auth";
 import type { DailyMenu } from "@/types/daily-menu";
 import type { DishOrder } from "@/types/dish-order";
-import type { FamilyPublic } from "@/types/family";
+import type { FamilyMember, FamilyPublic } from "@/types/family";
 import type { Notification } from "@/types/notification";
 import type { RecipeSummary } from "@/types/recipe";
 import type { ShoppingList } from "@/types/shopping-list";
 
 type HomeData = {
   family: FamilyPublic | null;
+  members: FamilyMember[];
   menu: DailyMenu | null;
   orders: DishOrder[];
   recipes: RecipeSummary[];
@@ -47,6 +48,7 @@ type HomeSectionErrors = Partial<Record<HomeSection, string>>;
 
 const emptyHomeData: HomeData = {
   family: null,
+  members: [],
   menu: null,
   orders: [],
   recipes: [],
@@ -223,6 +225,7 @@ export function HomeWorkspace() {
         : previous.orders;
       setData({
         family: familyResult.status === "fulfilled" ? familyResult.value.family : previous.family,
+        members: familyResult.status === "fulfilled" ? familyResult.value.members : previous.members,
         menu: menuResult.status === "fulfilled" ? menuResult.value.menu : previous.menu,
         orders: nextOrders,
         recipes: recipes ?? previous.recipes,
@@ -292,6 +295,11 @@ export function HomeWorkspace() {
   const isFamilyMember = Boolean(
     user && data.family && data.family.creator_id !== user.id,
   );
+  const currentFamilyMember = user
+    ? data.members.find((member) => member.user.id === user.id)
+    : undefined;
+  const isCook = Boolean(data.family && currentFamilyMember?.meal_role === "cook");
+  const showTodayMenuCard = !isFamilyMember && !isCook;
   const latestMenuNotice = data.notifications.find(
     (notification) =>
       notification.type.startsWith("daily_menu") && !notification.is_read,
@@ -347,6 +355,43 @@ export function HomeWorkspace() {
     }
   }
 
+  const tonightDecisionCard = (
+    <TonightDecisionCard
+      mode={tonightMode}
+      onModeChange={(mode) => {
+        setTonightMode(mode);
+        setTonightError(null);
+        setTonightMessage(null);
+      }}
+      recommendationRecipes={tonightRecommendations}
+      customRecipes={customRecipes}
+      customSearch={customSearch}
+      onCustomSearchChange={setCustomSearch}
+      selectedRecipeIds={tonightSelectedIds}
+      servings={tonightServings}
+      onServingsChange={setTonightServings}
+      onToggleRecipe={toggleTonightRecipe}
+      onShuffle={() => {
+        setRecommendationPage((current) => current + 1);
+        setTonightError(null);
+        setTonightMessage(null);
+      }}
+      onUseRecommendation={() => {
+        setTonightSelectedIds(tonightRecommendations.map((recipe) => recipe.id));
+        setTonightError(null);
+        setTonightMessage(null);
+      }}
+      onPublish={publishTonightMenu}
+      canPublish={canPublishTonight}
+      publishing={publishingTonight}
+      message={tonightMessage}
+      error={tonightError}
+      recipeError={sectionErrors.recipes}
+      onRetryRecipes={() => void loadHome()}
+      menu={data.menu}
+    />
+  );
+
   return (
     <WorkspaceShell
       title="今天吃什么好呢？"
@@ -371,12 +416,12 @@ export function HomeWorkspace() {
             </p>
           </div>
           <div className="home-welcome-actions">
-            <Link href="/orders" className="button-primary">
-              <OrdersIcon className="mr-2 h-4 w-4" />
-              快速点菜
+            <Link href={isCook ? "/menu" : "/orders"} className="button-primary">
+              {isCook ? <MenuIcon className="mr-2 h-4 w-4" /> : <OrdersIcon className="mr-2 h-4 w-4" />}
+              {isCook ? "查看今天菜谱" : "快速点菜"}
             </Link>
-            <Link href="/menu" className="button-secondary">
-              查看今日菜单
+            <Link href={isCook ? "/orders" : "/menu"} className="button-secondary">
+              {isCook ? "查看家人点菜" : "查看今日菜单"}
             </Link>
           </div>
         </section>
@@ -438,49 +483,21 @@ export function HomeWorkspace() {
               </div>
             ) : null}
 
-            {isFamilyMember ? (
-              <FamilyMemberTonightCard menu={data.menu} />
+            {isCook ? (
+              <>
+                <FamilyMemberTonightCard menu={data.menu} isOwner={canPublishTonight} />
+                {canPublishTonight ? tonightDecisionCard : null}
+              </>
+            ) : isFamilyMember ? (
+              <FamilyDinerTonightCard menu={data.menu} />
             ) : (
-              <TonightDecisionCard
-                mode={tonightMode}
-                onModeChange={(mode) => {
-                  setTonightMode(mode);
-                  setTonightError(null);
-                  setTonightMessage(null);
-                }}
-                recommendationRecipes={tonightRecommendations}
-                customRecipes={customRecipes}
-                customSearch={customSearch}
-                onCustomSearchChange={setCustomSearch}
-                selectedRecipeIds={tonightSelectedIds}
-                servings={tonightServings}
-                onServingsChange={setTonightServings}
-                onToggleRecipe={toggleTonightRecipe}
-                onShuffle={() => {
-                  setRecommendationPage((current) => current + 1);
-                  setTonightError(null);
-                  setTonightMessage(null);
-                }}
-                onUseRecommendation={() => {
-                  setTonightSelectedIds(tonightRecommendations.map((recipe) => recipe.id));
-                  setTonightError(null);
-                  setTonightMessage(null);
-                }}
-                onPublish={publishTonightMenu}
-                canPublish={canPublishTonight}
-                publishing={publishingTonight}
-                message={tonightMessage}
-                error={tonightError}
-                recipeError={sectionErrors.recipes}
-                onRetryRecipes={() => void loadHome()}
-                menu={data.menu}
-              />
+              tonightDecisionCard
             )}
 
             {latestMenuNotice ? <SharedMenuNotice notification={latestMenuNotice} /> : null}
 
-            <section className={`home-grid home-grid-primary ${isFamilyMember ? "home-grid-member" : ""}`}>
-              {!isFamilyMember ? (
+            <section className={`home-grid home-grid-primary ${!showTodayMenuCard ? "home-grid-member" : ""}`}>
+              {showTodayMenuCard ? (
                 <TodayMenuCard menu={data.menu} error={sectionErrors.menu} onRetry={() => void loadHome()} />
               ) : null}
               <ShoppingSummaryCard
@@ -495,13 +512,15 @@ export function HomeWorkspace() {
             <TodayOrdersCard groups={groupedOrders} error={sectionErrors.orders} onRetry={() => void loadHome()} />
 
             <section className="home-quick-grid" aria-label="快捷功能">
-              <Link href="/orders" className="home-quick-card">
+              <Link href={isCook ? "/menu" : "/orders"} className="home-quick-card">
                 <span className="home-quick-icon home-quick-icon-green">
-                  <OrdersIcon className="h-5 w-5" />
+                  {isCook ? <MenuIcon className="h-5 w-5" /> : <OrdersIcon className="h-5 w-5" />}
                 </span>
                 <span className="min-w-0">
-                  <span className="home-quick-title">快速点菜</span>
-                  <span className="home-quick-description">从菜谱库挑几道今晚想吃的菜</span>
+                  <span className="home-quick-title">{isCook ? "今天要做的菜" : "快速点菜"}</span>
+                  <span className="home-quick-description">
+                    {isCook ? "查看菜单、食材和每道菜的做法" : "从菜谱库挑几道今晚想吃的菜"}
+                  </span>
                 </span>
                 <ArrowRightIcon className="home-quick-arrow h-4 w-4" />
               </Link>
@@ -556,16 +575,26 @@ function SharedMenuNotice({ notification }: { notification: Notification }) {
   );
 }
 
-function FamilyMemberTonightCard({ menu }: { menu: DailyMenu | null }) {
+function FamilyMemberTonightCard({
+  menu,
+  isOwner,
+}: {
+  menu: DailyMenu | null;
+  isOwner: boolean;
+}) {
   return (
     <section className="section-card home-member-tonight-card" aria-labelledby="family-tonight-title">
       <div className="section-head">
         <div>
-          <p className="text-sm font-semibold text-emerald-700">家庭共享</p>
+          <p className="text-sm font-semibold text-emerald-700">做饭人 · 家庭共享</p>
           <h2 id="family-tonight-title" className="mt-1 text-2xl font-semibold tracking-tight text-stone-900">
-            今晚吃什么？
+            今天做什么？
           </h2>
-          <p className="section-description">家庭创建者发布后，你可以查看菜单并告诉家人偏好。</p>
+          <p className="section-description">
+            {isOwner
+              ? "先在这里查看今天菜单，需要调整时可在下方直接安排。"
+              : "家庭菜单发布后，今天要做的菜会直接显示在这里。"}
+          </p>
         </div>
         <span className={`chip ${menu?.status === "confirmed" ? "chip-accent" : "chip-neutral"}`}>
           {menu?.status === "confirmed" ? "已发布" : "等待发布"}
@@ -606,6 +635,46 @@ function FamilyMemberTonightCard({ menu }: { menu: DailyMenu | null }) {
         </span>
         <Link href="/menu" className="button-primary button-sm">
           打开家庭菜单
+        </Link>
+      </div>
+    </section>
+  );
+}
+
+function FamilyDinerTonightCard({ menu }: { menu: DailyMenu | null }) {
+  return (
+    <section className="section-card home-member-tonight-card" aria-labelledby="diner-tonight-title">
+      <div className="section-head">
+        <div>
+          <p className="text-sm font-semibold text-emerald-700">干饭人 · 家庭共享</p>
+          <h2 id="diner-tonight-title" className="mt-1 text-2xl font-semibold tracking-tight text-stone-900">
+            先点几道想吃的
+          </h2>
+          <p className="section-description">把你的选择交给做饭的人，家庭菜单发布后也能在这里查看。</p>
+        </div>
+        <span className="chip chip-accent">负责点菜</span>
+      </div>
+
+      {menu?.items.length ? (
+        <div className="home-empty-state mt-5">
+          <p className="font-medium text-stone-800">今晚菜单已发布</p>
+          <p className="mt-1 text-sm leading-6 text-stone-500">
+            {menu.items.map((item) => item.recipe.title).join("、")}
+          </p>
+        </div>
+      ) : (
+        <div className="home-empty-state mt-5">
+          <p className="font-medium text-stone-800">今晚还等你的选择</p>
+          <p className="mt-1 text-sm leading-6 text-stone-500">从家庭菜谱里选几道你想吃的菜吧。</p>
+        </div>
+      )}
+
+      <div className="home-card-footer mt-4">
+        <span className="text-sm text-stone-500">
+          {menu?.items.length ? `${menu.items.length} 道菜 · ${menu.meal_time} 开饭` : "提交后做饭人会看到"}
+        </span>
+        <Link href="/orders" className="button-primary button-sm">
+          去点菜
         </Link>
       </div>
     </section>

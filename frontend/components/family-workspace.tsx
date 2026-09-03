@@ -20,12 +20,18 @@ import { RecipeThumb } from "@/components/recipe-thumb";
 import { UserAvatar } from "@/components/user-avatar";
 import { ApiError } from "@/lib/api";
 import { getCurrentUser, logoutUser } from "@/services/auth";
-import { createFamily, getCurrentFamily, joinFamily } from "@/services/family";
+import {
+  createFamily,
+  getCurrentFamily,
+  joinFamily,
+  updateFamilyMemberMealRole,
+  updateMyMealRole,
+} from "@/services/family";
 import { getFavoriteRecipes, getRecipeHistory, setRecipeFavorite } from "@/services/recipes";
 import { getDietaryPreference } from "@/services/dietary-preferences";
 import type { User } from "@/types/auth";
 import type { DietaryPreference } from "@/types/dietary-preference";
-import type { FamilyMember, FamilyPublic } from "@/types/family";
+import type { FamilyMember, FamilyPublic, MealRole } from "@/types/family";
 import type { RecipeHistoryItem, RecipeSummary } from "@/types/recipe";
 
 const dateFormatter = new Intl.DateTimeFormat("zh-CN", {
@@ -41,6 +47,16 @@ const historyTimeFormatter = new Intl.DateTimeFormat("zh-CN", {
   hour: "numeric",
   minute: "2-digit",
 });
+
+const mealRoleLabels: Record<MealRole, string> = {
+  diner: "干饭人",
+  cook: "做饭人",
+};
+
+const mealRoleDescriptions: Record<MealRole, string> = {
+  diner: "负责选想吃的菜、提交点菜",
+  cook: "优先查看今天要做的菜和采购清单",
+};
 
 function getHistoryDateKey(value: string) {
   const date = new Date(value);
@@ -105,6 +121,9 @@ export function FamilyWorkspace() {
   const [copied, setCopied] = useState(false);
   const [familyName, setFamilyName] = useState("");
   const [inviteCode, setInviteCode] = useState("");
+  const [mealRole, setMealRole] = useState<MealRole>("diner");
+  const [savingMealRole, setSavingMealRole] = useState(false);
+  const [savingMemberRoleId, setSavingMemberRoleId] = useState<number | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -138,6 +157,10 @@ export function FamilyWorkspace() {
         if (familyResult.status === "fulfilled") {
           setFamily(familyResult.value.family);
           setMembers(familyResult.value.members);
+          setMealRole(
+            familyResult.value.members.find((member) => member.user.id === loadedUser?.id)
+              ?.meal_role ?? "diner",
+          );
         } else {
           setError("加载家庭信息失败，请重试");
         }
@@ -189,6 +212,9 @@ export function FamilyWorkspace() {
       const response = await createFamily({ name: familyName });
       setFamily(response.family);
       setMembers(response.members);
+      setMealRole(
+        response.members.find((member) => member.user.id === user?.id)?.meal_role ?? "diner",
+      );
       setFamilyName("");
       setMessage("家庭已创建，邀请码可以分享给家人");
     } catch (err) {
@@ -217,6 +243,9 @@ export function FamilyWorkspace() {
       const response = await joinFamily({ invite_code: normalizedInviteCode });
       setFamily(response.family);
       setMembers(response.members);
+      setMealRole(
+        response.members.find((member) => member.user.id === user?.id)?.meal_role ?? "diner",
+      );
       setInviteCode("");
       setMessage(`已加入${response.family?.name ?? "家庭"}`);
     } catch (err) {
@@ -227,6 +256,75 @@ export function FamilyWorkspace() {
       );
     } finally {
       setJoining(false);
+    }
+  }
+
+  async function handleSaveMealRole() {
+    if (!family || !user || savingMealRole) {
+      return;
+    }
+
+    setSavingMealRole(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const updatedMember = await updateMyMealRole({ meal_role: mealRole });
+      setMembers((current) =>
+        current.map((member) =>
+          member.id === updatedMember.id ? { ...member, meal_role: updatedMember.meal_role } : member,
+        ),
+      );
+      setMessage(`家庭身份已更新为${mealRoleLabels[updatedMember.meal_role]}`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "保存家庭身份失败，请重试");
+    } finally {
+      setSavingMealRole(false);
+    }
+  }
+
+  async function handleUpdateMemberMealRole(memberId: number, nextMealRole: MealRole) {
+    if (savingMemberRoleId !== null) {
+      return;
+    }
+
+    const previousMember = members.find((member) => member.id === memberId);
+    if (!previousMember || previousMember.meal_role === nextMealRole) {
+      return;
+    }
+
+    setSavingMemberRoleId(memberId);
+    setError(null);
+    setMessage(null);
+    setMembers((current) =>
+      current.map((member) =>
+        member.id === memberId ? { ...member, meal_role: nextMealRole } : member,
+      ),
+    );
+
+    try {
+      const updatedMember = await updateFamilyMemberMealRole(memberId, {
+        meal_role: nextMealRole,
+      });
+      setMembers((current) =>
+        current.map((member) =>
+          member.id === updatedMember.id
+            ? { ...member, meal_role: updatedMember.meal_role }
+            : member,
+        ),
+      );
+      setMessage(`${updatedMember.nickname} 已设置为${mealRoleLabels[updatedMember.meal_role]}`);
+    } catch (err) {
+      setMembers((current) =>
+        current.map((member) =>
+          member.id === memberId
+            ? { ...member, meal_role: previousMember.meal_role }
+            : member,
+        ),
+      );
+      setError(err instanceof ApiError ? err.message : "设置成员身份失败，请重试");
+    } finally {
+      setSavingMemberRoleId(null);
     }
   }
 
@@ -483,12 +581,76 @@ export function FamilyWorkspace() {
                           </p>
                         </div>
                       </div>
-                      <span className="chip chip-neutral">
-                        {member.role === "owner" ? "创建者" : "成员"}
-                      </span>
+                      <div className="profile-member-badges">
+                        <span className="chip chip-neutral">
+                          {member.role === "owner" ? "创建者" : "成员"}
+                        </span>
+                        {family.creator_id === user.id && member.user.id !== user.id ? (
+                          <label className="profile-member-role-control">
+                            <span className="sr-only">设置{member.nickname}的家庭身份</span>
+                            <select
+                              className="select profile-member-role-select"
+                              value={member.meal_role}
+                              onChange={(event) =>
+                                void handleUpdateMemberMealRole(
+                                  member.id,
+                                  event.target.value as MealRole,
+                                )
+                              }
+                              disabled={savingMemberRoleId !== null}
+                            >
+                              {(Object.keys(mealRoleLabels) as MealRole[]).map((option) => (
+                                <option key={option} value={option}>
+                                  {mealRoleLabels[option]}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        ) : (
+                          <span className={`chip ${member.meal_role === "cook" ? "chip-warm" : "chip-accent"}`}>
+                            {mealRoleLabels[member.meal_role]}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
+              </section>
+
+              <section id="meal-role" className="section-card profile-role-card">
+                <div className="section-head">
+                  <div>
+                    <h2 className="section-title">我的家庭身份</h2>
+                    <p className="section-description">
+                      选择你在这个家庭里的主要分工，首页会自动显示最需要的内容。
+                    </p>
+                  </div>
+                  <span className="chip chip-neutral">可随时修改</span>
+                </div>
+
+                <div className="meal-role-options" role="group" aria-label="选择家庭身份">
+                  {(Object.keys(mealRoleLabels) as MealRole[]).map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      className={`meal-role-option ${mealRole === option ? "is-active" : ""}`}
+                      aria-pressed={mealRole === option}
+                      onClick={() => setMealRole(option)}
+                      disabled={savingMealRole}
+                    >
+                      <span className="meal-role-option-title">{mealRoleLabels[option]}</span>
+                      <span className="meal-role-option-description">{mealRoleDescriptions[option]}</span>
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="button-primary mt-4"
+                  onClick={() => void handleSaveMealRole()}
+                  disabled={savingMealRole || mealRole === members.find((member) => member.user.id === user.id)?.meal_role}
+                >
+                  {savingMealRole ? "保存中..." : "保存我的身份"}
+                </button>
               </section>
             </>
           ) : (
@@ -633,6 +795,18 @@ function ProfileFunctionList({
           </span>
           <ArrowRightIcon className="h-4 w-4 shrink-0" />
         </a>
+        {hasFamily ? (
+          <a href="#meal-role" className="profile-function-item">
+            <span className="profile-function-icon">
+              <SettingsIcon className="h-4 w-4" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="profile-function-title">我的家庭身份</span>
+              <span className="profile-function-description">选择干饭人或做饭人</span>
+            </span>
+            <ArrowRightIcon className="h-4 w-4 shrink-0" />
+          </a>
+        ) : null}
 
         <a href="#favorites" className="profile-function-item">
           <span className="profile-function-icon">

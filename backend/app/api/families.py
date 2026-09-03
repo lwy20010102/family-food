@@ -12,6 +12,7 @@ from app.schemas.family import (
     FamilyMembersResponse,
     FamilyPublic,
     JoinFamilyRequest,
+    UpdateMealRoleRequest,
 )
 from app.services.family_service import (
     add_member_to_family,
@@ -20,6 +21,8 @@ from app.services.family_service import (
     get_user_family,
     get_user_membership,
     list_family_members,
+    update_family_member_meal_role,
+    update_user_meal_role,
 )
 
 router = APIRouter(prefix="/families", tags=["families"])
@@ -67,6 +70,55 @@ def family_members(
             for member in list_family_members(db, family.id)
         ],
     )
+
+
+@router.patch("/members/me/meal-role", response_model=FamilyMemberPublic)
+def update_my_meal_role(
+    payload: UpdateMealRoleRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> FamilyMemberPublic:
+    try:
+        member = update_user_meal_role(db, current_user.id, payload.meal_role)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    return FamilyMemberPublic.model_validate(member)
+
+
+@router.patch("/members/{member_id}/meal-role", response_model=FamilyMemberPublic)
+def update_family_member_meal_role_endpoint(
+    member_id: int,
+    payload: UpdateMealRoleRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> FamilyMemberPublic:
+    try:
+        member = update_family_member_meal_role(
+            db,
+            current_user.id,
+            member_id,
+            payload.meal_role,
+        )
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    return FamilyMemberPublic.model_validate(member)
 
 
 @router.post("", response_model=CurrentFamilyResponse, status_code=status.HTTP_201_CREATED)
