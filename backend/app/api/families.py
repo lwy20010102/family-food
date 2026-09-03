@@ -76,7 +76,13 @@ def create_family(
     db: Session = Depends(get_db),
 ) -> CurrentFamilyResponse:
     _ensure_user_without_family(db, current_user)
-    family = create_family_for_user(db, current_user, payload.name)
+    try:
+        family = create_family_for_user(db, current_user, payload.name)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
     return _serialize_family(family)
 
 
@@ -95,5 +101,11 @@ def join_family(
             detail="邀请码不存在",
         )
 
-    family = add_member_to_family(db, family, current_user)
+    try:
+        family = add_member_to_family(db, family, current_user)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
     return _serialize_family(family)
