@@ -25,7 +25,7 @@ import { getNotifications } from "@/services/notifications";
 import { getRecipes } from "@/services/recipes";
 import { getTodayShoppingList } from "@/services/shopping-lists";
 import type { User } from "@/types/auth";
-import type { DailyMenu } from "@/types/daily-menu";
+import type { DailyMenu, DailyMenuItemStatus } from "@/types/daily-menu";
 import type { DishOrder } from "@/types/dish-order";
 import type { FamilyMember, FamilyPublic } from "@/types/family";
 import type { Notification } from "@/types/notification";
@@ -90,6 +90,20 @@ function getMenuState(menu: DailyMenu | null) {
 
   return menu.status === "confirmed" ? "已发布" : "待确认";
 }
+
+const dailyMenuItemStatusLabels: Record<DailyMenuItemStatus, string> = {
+  planned: "待制作",
+  cooking: "制作中",
+  served: "已上桌",
+  cancelled: "已取消",
+};
+
+const dailyMenuItemStatusClasses: Record<DailyMenuItemStatus, string> = {
+  planned: "home-cook-status-planned",
+  cooking: "home-cook-status-cooking",
+  served: "home-cook-status-served",
+  cancelled: "home-cook-status-cancelled",
+};
 
 function isMeatRecipe(recipe: RecipeSummary) {
   return recipe.category === "肉类" || recipe.category === "海鲜";
@@ -582,60 +596,97 @@ function FamilyMemberTonightCard({
   menu: DailyMenu | null;
   isOwner: boolean;
 }) {
+  const menuItems = menu?.items ?? [];
+  const isPublished = menu?.status === "confirmed";
+
   return (
-    <section className="section-card home-member-tonight-card" aria-labelledby="family-tonight-title">
-      <div className="section-head">
-        <div>
-          <p className="text-sm font-semibold text-emerald-700">做饭人 · 家庭共享</p>
-          <h2 id="family-tonight-title" className="mt-1 text-2xl font-semibold tracking-tight text-stone-900">
-            今天做什么？
-          </h2>
+    <section className="section-card home-cook-today-card" aria-labelledby="family-tonight-title">
+      <div className="home-cook-header">
+        <div className="min-w-0">
+          <div className="home-cook-title-row">
+            <h2 id="family-tonight-title" className="section-title">今天要做的菜</h2>
+            <span className={`chip ${isPublished ? "chip-accent" : "chip-neutral"}`}>
+              {isPublished ? "已发布" : "等待发布"}
+            </span>
+          </div>
           <p className="section-description">
             {isOwner
-              ? "先在这里查看今天菜单，需要调整时可在下方直接安排。"
-              : "家庭菜单发布后，今天要做的菜会直接显示在这里。"}
+              ? "先看清今天的菜，需要调整时可在下方直接安排。"
+              : "家庭菜单发布后，所有菜品会在这里直接显示。"}
           </p>
         </div>
-        <span className={`chip ${menu?.status === "confirmed" ? "chip-accent" : "chip-neutral"}`}>
-          {menu?.status === "confirmed" ? "已发布" : "等待发布"}
-        </span>
+
+        {menuItems.length ? (
+          <div className="home-cook-stats" aria-label="今日做饭信息">
+            <span className="home-cook-stat">
+              <strong>{menuItems.length}</strong>
+              <span>道菜</span>
+            </span>
+            <span className="home-cook-stat">
+              <strong>{menu?.meal_time ?? "--:--"}</strong>
+              <span>开饭</span>
+            </span>
+            <span className="home-cook-stat">
+              <strong>{menu?.servings ?? 0}</strong>
+              <span>人份</span>
+            </span>
+          </div>
+        ) : null}
       </div>
 
-      {menu?.items.length ? (
-        <div className="home-menu-list mt-5">
-          {menu.items.slice(0, 6).map((item) => (
-            <Link key={item.id} href={`/recipes/${item.recipe.id}`} className="home-menu-item">
+      {menuItems.length ? (
+        <div className="home-cook-recipe-grid" aria-label="今日要做的菜">
+          {menuItems.map((item) => (
+            <Link key={item.id} href={`/recipes/${item.recipe.id}`} className="home-cook-recipe-item">
               <RecipeThumb
                 src={item.recipe.image_url}
                 title={item.recipe.title}
                 category={item.recipe.category}
-                variant="sm"
-                className="h-12 w-16 shrink-0 rounded-[10px]"
+                variant="md"
+                className="home-cook-recipe-thumb"
               />
-              <span className="min-w-0 flex-1">
-                <span className="block line-clamp-2 break-words font-medium text-stone-900">{item.recipe.title}</span>
-                <span className="mt-1 block text-xs text-stone-500">
-                  {item.recipe.cooking_time ? `${item.recipe.cooking_time} 分钟` : "时间待定"}
+              <span className="home-cook-recipe-copy">
+                <span className="home-cook-recipe-heading">
+                  <span className="home-cook-recipe-title line-clamp-2">{item.recipe.title}</span>
+                  <span className={`home-cook-status ${dailyMenuItemStatusClasses[item.status]}`}>
+                    {dailyMenuItemStatusLabels[item.status]}
+                  </span>
+                </span>
+                <span className="home-cook-recipe-meta">
+                  {item.recipe.category}
+                  {item.recipe.cooking_time ? ` · ${item.recipe.cooking_time} 分钟` : " · 时间待定"}
+                </span>
+                <span className="home-cook-recipe-link">
+                  查看做法
+                  <ArrowRightIcon className="h-3.5 w-3.5" />
                 </span>
               </span>
-              <span className="text-xs text-stone-400">查看</span>
             </Link>
           ))}
         </div>
       ) : (
-        <div className="home-empty-state mt-5">
-          <p className="font-medium text-stone-800">今晚菜单还没发布</p>
-          <p className="mt-1 text-sm leading-6 text-stone-500">发布后这里会自动同步，届时可以直接查看并反馈。</p>
+        <div className="home-cook-empty">
+          <p className="font-medium text-stone-800">今天还没有可做的菜</p>
+          <p className="mt-1 text-sm leading-6 text-stone-500">
+            {isOwner ? "可以在下方安排菜单，发布后家庭成员会立即看到。" : "等待家庭创建者发布菜单，发布后会自动同步到这里。"}
+          </p>
         </div>
       )}
 
-      <div className="home-card-footer mt-4">
+      <div className="home-card-footer">
         <span className="text-sm text-stone-500">
-          {menu?.items.length ? `${menu.items.length} 道菜 · ${menu.meal_time} 开饭 · ${menu.servings} 人份` : "等待家庭创建者安排"}
+          {menuItems.length ? "点菜和菜单更新后会自动同步" : "家庭菜单每 30 秒自动同步"}
         </span>
-        <Link href="/menu" className="button-primary button-sm">
-          打开家庭菜单
-        </Link>
+        <div className="home-cook-actions">
+          <Link href="/menu" className="button-primary button-sm">
+            <MenuIcon className="mr-2 h-4 w-4" />
+            打开今日菜单
+          </Link>
+          <Link href="/menu#shopping-list" className="button-secondary button-sm">
+            <ShoppingListIcon className="mr-2 h-4 w-4" />
+            看采购清单
+          </Link>
+        </div>
       </div>
     </section>
   );

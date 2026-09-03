@@ -490,6 +490,95 @@ code {
     @apply border-emerald-200 bg-emerald-50/30;
   }
 
+  .home-cook-today-card {
+    @apply border-emerald-200 bg-white;
+    box-shadow: 0 18px 42px rgba(21, 128, 61, 0.08);
+  }
+
+  .home-cook-header {
+    @apply flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between;
+  }
+
+  .home-cook-title-row {
+    @apply flex flex-wrap items-center gap-2;
+  }
+
+  .home-cook-stats {
+    @apply grid grid-cols-3 gap-2 sm:min-w-[250px];
+  }
+
+  .home-cook-stat {
+    @apply flex min-h-16 flex-col justify-center rounded-[12px] bg-emerald-50 px-3 py-2 text-center;
+  }
+
+  .home-cook-stat strong {
+    @apply text-lg font-semibold text-emerald-950;
+  }
+
+  .home-cook-stat span {
+    @apply mt-0.5 text-xs text-emerald-800/75;
+  }
+
+  .home-cook-recipe-grid {
+    @apply mt-5 grid gap-x-5 gap-y-4 md:grid-cols-2;
+  }
+
+  .home-cook-recipe-item {
+    @apply flex min-w-0 gap-3 rounded-[12px] border border-stone-200 bg-stone-50/60 p-3 transition hover:border-emerald-300 hover:bg-white;
+  }
+
+  .home-cook-recipe-thumb {
+    @apply h-24 w-28 shrink-0 rounded-[10px] sm:h-28 sm:w-36;
+  }
+
+  .home-cook-recipe-copy {
+    @apply flex min-w-0 flex-1 flex-col;
+  }
+
+  .home-cook-recipe-heading {
+    @apply flex min-w-0 items-start justify-between gap-2;
+  }
+
+  .home-cook-recipe-title {
+    @apply min-w-0 break-words font-semibold leading-6 text-stone-900;
+  }
+
+  .home-cook-status {
+    @apply shrink-0 rounded-full px-2 py-1 text-[11px] font-medium;
+  }
+
+  .home-cook-status-planned {
+    @apply bg-stone-100 text-stone-700;
+  }
+
+  .home-cook-status-cooking {
+    @apply bg-amber-50 text-amber-700;
+  }
+
+  .home-cook-status-served {
+    @apply bg-emerald-50 text-emerald-700;
+  }
+
+  .home-cook-status-cancelled {
+    @apply bg-rose-50 text-rose-700;
+  }
+
+  .home-cook-recipe-meta {
+    @apply mt-1 text-xs text-stone-500;
+  }
+
+  .home-cook-recipe-link {
+    @apply mt-auto flex items-center gap-1 pt-3 text-xs font-semibold text-emerald-700;
+  }
+
+  .home-cook-empty {
+    @apply mt-5 rounded-[14px] bg-stone-50 px-4 py-6;
+  }
+
+  .home-cook-actions {
+    @apply flex flex-wrap gap-2;
+  }
+
   .meal-role-options {
     @apply mt-5 grid gap-3 sm:grid-cols-2;
   }
