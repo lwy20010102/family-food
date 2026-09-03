@@ -99,6 +99,7 @@ export function FamilyWorkspace() {
   const [message, setMessage] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [joining, setJoining] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
   const [favoriteBusyId, setFavoriteBusyId] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
@@ -199,18 +200,31 @@ export function FamilyWorkspace() {
 
   async function handleJoin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const normalizedInviteCode = inviteCode.replace(/\s+/g, "").toUpperCase();
+
+    if (!/^[A-Z0-9]{4,16}$/.test(normalizedInviteCode)) {
+      setJoinError("请输入家庭创建者分享的邀请码，只包含字母和数字");
+      return;
+    }
+
     setJoining(true);
     setError(null);
     setMessage(null);
+    setJoinError(null);
+    setInviteCode(normalizedInviteCode);
 
     try {
-      const response = await joinFamily({ invite_code: inviteCode });
+      const response = await joinFamily({ invite_code: normalizedInviteCode });
       setFamily(response.family);
       setMembers(response.members);
       setInviteCode("");
       setMessage(`已加入${response.family?.name ?? "家庭"}`);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "加入家庭失败，请重试");
+      setJoinError(
+        err instanceof ApiError
+          ? err.message
+          : "网络连接失败，请检查网络后重试",
+      );
     } finally {
       setJoining(false);
     }
@@ -526,14 +540,35 @@ export function FamilyWorkspace() {
                     <input
                       type="text"
                       value={inviteCode}
-                      onChange={(event) => setInviteCode(event.target.value)}
+                      onChange={(event) => {
+                        setInviteCode(
+                          event.target.value.replace(/\s+/g, "").toUpperCase(),
+                        );
+                        setJoinError(null);
+                      }}
                       className="field uppercase tracking-[0.2em]"
                       placeholder="ABC123"
                       minLength={4}
+                      maxLength={16}
+                      autoCapitalize="characters"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      disabled={joining}
+                      aria-invalid={Boolean(joinError)}
+                      aria-describedby={joinError ? "join-family-error" : undefined}
                       required
                     />
                   </label>
-                  <button type="submit" disabled={joining} className="button-secondary mt-4">
+                  {joinError ? (
+                    <p
+                      id="join-family-error"
+                      className="mt-3 profile-message profile-message-error"
+                      role="alert"
+                    >
+                      {joinError}
+                    </p>
+                  ) : null}
+                  <button type="submit" disabled={joining} className="button-primary mt-4">
                     {joining ? "加入中..." : "加入家庭"}
                   </button>
                 </form>

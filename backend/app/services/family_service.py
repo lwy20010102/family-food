@@ -70,6 +70,7 @@ def load_family_by_id(db: Session, family_id: int) -> Family | None:
     statement = (
         select(Family)
         .where(Family.id == family_id)
+        .execution_options(populate_existing=True)
         .options(
             selectinload(Family.members).selectinload(FamilyMember.user),
             selectinload(Family.creator),
